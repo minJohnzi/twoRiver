@@ -3,6 +3,12 @@ import Fastify from "fastify";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
 
+declare module "fastify" {
+  interface FastifyInstance {
+    db: BlogDatabase;
+  }
+}
+
 export interface BuildAppOptions {
   config: AppConfig;
   db: BlogDatabase;
