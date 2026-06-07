@@ -10,7 +10,7 @@ const ConfigSchema = z.object({
   DATABASE_PATH: z.string().default(DEFAULT_DATABASE_PATH),
   SESSION_SECRET: z.string().min(32).default(DEFAULT_SESSION_SECRET),
   ADMIN_USERNAME: z.string().default("admin"),
-  ADMIN_PASSWORD: z.string().default(DEFAULT_ADMIN_PASSWORD),
+  ADMIN_PASSWORD: z.string().min(12).default(DEFAULT_ADMIN_PASSWORD),
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com")
 });
