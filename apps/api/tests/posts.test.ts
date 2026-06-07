@@ -173,3 +173,189 @@ describe("post routes", () => {
     }
   });
 });
+
+describe("tag routes", () => {
+  test("authenticated admin tag list, create, and update return envelopes", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+
+      const initialListResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/tags",
+        headers: { cookie }
+      });
+      expect(initialListResponse.statusCode).toBe(200);
+      expect(initialListResponse.json()).toEqual({ tags: [] });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "Type   Script!!! Guide",
+          name: "Zulu"
+        }
+      });
+      expect(createResponse.statusCode).toBe(201);
+      const createdBody = createResponse.json();
+      expect(createdBody.tag).toEqual(
+        expect.objectContaining({
+          slug: "type-script-guide",
+          name: "Zulu"
+        })
+      );
+
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/tags/${createdBody.tag.id}`,
+        headers: { cookie },
+        payload: {
+          name: "Alpha"
+        }
+      });
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json()).toEqual({
+        tag: expect.objectContaining({
+          id: createdBody.tag.id,
+          slug: "type-script-guide",
+          name: "Alpha"
+        })
+      });
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/tags",
+        headers: { cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json()).toEqual({
+        tags: [
+          expect.objectContaining({
+            id: createdBody.tag.id,
+            slug: "type-script-guide",
+            name: "Alpha"
+          })
+        ]
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("public tags return an envelope sorted by display name", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "a-slug",
+          name: "Zulu"
+        }
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "z-slug",
+          name: "Alpha"
+        }
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/tags"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        tags: [
+          expect.objectContaining({
+            slug: "z-slug",
+            name: "Alpha"
+          }),
+          expect.objectContaining({
+            slug: "a-slug",
+            name: "Zulu"
+          })
+        ]
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("post tag creation upserts display names for matching normalized slugs", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+
+      const firstPostResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "first-tag-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: ["TypeScript"],
+          translations: [
+            {
+              locale: "en",
+              title: "First tag post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(firstPostResponse.statusCode).toBe(201);
+
+      const secondPostResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "second-tag-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: ["typeSCRIPT"],
+          translations: [
+            {
+              locale: "en",
+              title: "Second tag post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(secondPostResponse.statusCode).toBe(201);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/tags"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        tags: [
+          expect.objectContaining({
+            slug: "typescript",
+            name: "typeSCRIPT"
+          })
+        ]
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});
