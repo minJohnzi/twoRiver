@@ -21,3 +21,7 @@ pnpm build
 pnpm typecheck
 pnpm test
 ```
+
+## Deployment
+
+See [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md).
