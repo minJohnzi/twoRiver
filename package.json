@@ -1,0 +1,19 @@
+{
+  "name": "tworiver-blog",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @tworiver/api --filter @tworiver/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "api:migrate": "pnpm --filter @tworiver/api migrate",
+    "api:seed-admin": "pnpm --filter @tworiver/api seed:admin"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
