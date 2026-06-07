@@ -1,5 +1,6 @@
 import { UpsertPostInputSchema, type PostTranslation, type Tag, type UpsertPostInput } from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
+import { normalizeSlug } from "../services/slugService.js";
 import { ensureTags } from "./tagsRepository.js";
 
 export interface PostRecord {
@@ -35,6 +36,20 @@ interface TagRow {
   id: number;
   slug: string;
   name: string;
+}
+
+export class InvalidPostInputError extends Error {
+  constructor() {
+    super("Invalid post input");
+    this.name = "InvalidPostInputError";
+  }
+}
+
+export class PostSlugConflictError extends Error {
+  constructor() {
+    super("Post slug already exists");
+    this.name = "PostSlugConflictError";
+  }
 }
 
 function mapTranslation(row: TranslationRow): PostTranslation {
@@ -128,10 +143,42 @@ function replacePostRelations(db: BlogDatabase, postId: number, input: UpsertPos
   }
 }
 
+function validatePostInput(input: UpsertPostInput): void {
+  const locales = new Set<string>();
+  for (const translation of input.translations) {
+    if (locales.has(translation.locale)) {
+      throw new InvalidPostInputError();
+    }
+    locales.add(translation.locale);
+  }
+
+  for (const tagSlug of input.tagSlugs) {
+    if (!normalizeSlug(tagSlug)) {
+      throw new InvalidPostInputError();
+    }
+  }
+}
+
+function postSlugExists(db: BlogDatabase, slug: string, excludedPostId?: number): boolean {
+  const row =
+    excludedPostId === undefined
+      ? (db.prepare("SELECT id FROM posts WHERE slug = ?").get(slug) as { id: number } | undefined)
+      : (db
+          .prepare("SELECT id FROM posts WHERE slug = ? AND id <> ?")
+          .get(slug, excludedPostId) as { id: number } | undefined);
+
+  return row !== undefined;
+}
+
 export function createPost(db: BlogDatabase, input: unknown): PostRecord {
   const parsed = UpsertPostInputSchema.parse(input);
+  validatePostInput(parsed);
 
   return db.transaction(() => {
+    if (postSlugExists(db, parsed.slug)) {
+      throw new PostSlugConflictError();
+    }
+
     const now = new Date().toISOString();
     const result = db
       .prepare(
@@ -159,6 +206,10 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
     const existing = getPostRowById(db, id);
     if (!existing) {
       return undefined;
+    }
+    validatePostInput(parsed);
+    if (postSlugExists(db, parsed.slug, id)) {
+      throw new PostSlugConflictError();
     }
 
     const now = new Date().toISOString();

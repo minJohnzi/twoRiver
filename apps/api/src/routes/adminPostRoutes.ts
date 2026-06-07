@@ -1,10 +1,12 @@
 import { UpsertPostInputSchema } from "@tworiver/shared";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   createPost,
   deletePost,
   getAdminPostById,
+  InvalidPostInputError,
   listAdminPosts,
+  PostSlugConflictError,
   updatePost
 } from "../repositories/postsRepository.js";
 
@@ -15,6 +17,19 @@ interface IdParams {
 function parseId(id: string): number | undefined {
   const parsed = Number(id);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function sendPostError(error: unknown, reply: FastifyReply): boolean {
+  if (error instanceof InvalidPostInputError) {
+    reply.code(400).send({ message: "Invalid post input" });
+    return true;
+  }
+  if (error instanceof PostSlugConflictError) {
+    reply.code(409).send({ message: "Post slug already exists" });
+    return true;
+  }
+
+  return false;
 }
 
 export async function adminPostRoutes(app: FastifyInstance) {
@@ -31,9 +46,16 @@ export async function adminPostRoutes(app: FastifyInstance) {
       return;
     }
 
-    const post = createPost(app.db, parsed.data);
-    reply.code(201);
-    return { post };
+    try {
+      const post = createPost(app.db, parsed.data);
+      reply.code(201);
+      return { post };
+    } catch (error) {
+      if (sendPostError(error, reply)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.get<{ Params: IdParams }>("/api/admin/posts/:id", async (request, reply) => {
@@ -64,13 +86,20 @@ export async function adminPostRoutes(app: FastifyInstance) {
       return;
     }
 
-    const post = updatePost(app.db, id, parsed.data);
-    if (!post) {
-      reply.code(404).send({ message: "Post not found" });
-      return;
-    }
+    try {
+      const post = updatePost(app.db, id, parsed.data);
+      if (!post) {
+        reply.code(404).send({ message: "Post not found" });
+        return;
+      }
 
-    return { post };
+      return { post };
+    } catch (error) {
+      if (sendPostError(error, reply)) {
+        return;
+      }
+      throw error;
+    }
   });
 
   app.delete<{ Params: IdParams }>("/api/admin/posts/:id", async (request) => {

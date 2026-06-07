@@ -172,6 +172,179 @@ describe("post routes", () => {
       await app.close();
     }
   });
+
+  test("returns conflict for duplicate post slugs on create and update", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+      const firstPostResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "duplicate-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "First post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(firstPostResponse.statusCode).toBe(201);
+
+      const secondPostResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "second-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "Second post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(secondPostResponse.statusCode).toBe(201);
+
+      const duplicateCreateResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "duplicate-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "Duplicate post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(duplicateCreateResponse.statusCode).toBe(409);
+      expect(duplicateCreateResponse.json()).toEqual({ message: "Post slug already exists" });
+
+      const secondPostBody = secondPostResponse.json();
+      const duplicateUpdateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${secondPostBody.post.id}`,
+        headers: { cookie },
+        payload: {
+          slug: "duplicate-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "Updated duplicate post",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+      expect(duplicateUpdateResponse.statusCode).toBe(409);
+      expect(duplicateUpdateResponse.json()).toEqual({ message: "Post slug already exists" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects duplicate translation locales before creating a post", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "duplicate-locales",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "English one",
+              summary: "",
+              contentMarkdown: ""
+            },
+            {
+              locale: "en",
+              title: "English two",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: "Invalid post input" });
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/posts",
+        headers: { cookie }
+      });
+      expect(listResponse.json()).toEqual({ posts: [] });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects post tag slugs that normalize to empty strings", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie },
+        payload: {
+          slug: "empty-tag-slug",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: ["!!!"],
+          translations: [
+            {
+              locale: "en",
+              title: "Empty tag slug",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: "Invalid post input" });
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe("tag routes", () => {
@@ -354,6 +527,81 @@ describe("tag routes", () => {
           })
         ]
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns conflict when creating a duplicate admin tag", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "TypeScript",
+          name: "TypeScript"
+        }
+      });
+      expect(createResponse.statusCode).toBe(201);
+
+      const duplicateResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "typeSCRIPT",
+          name: "Different display"
+        }
+      });
+      expect(duplicateResponse.statusCode).toBe(409);
+      expect(duplicateResponse.json()).toEqual({ message: "Tag already exists" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns conflict when updating an admin tag to an existing slug", async () => {
+    const app = await createTestApp();
+
+    try {
+      const cookie = await login(app);
+      const firstTagResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "first-tag",
+          name: "First"
+        }
+      });
+      expect(firstTagResponse.statusCode).toBe(201);
+
+      const secondTagResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie },
+        payload: {
+          slug: "second-tag",
+          name: "Second"
+        }
+      });
+      expect(secondTagResponse.statusCode).toBe(201);
+
+      const secondTagBody = secondTagResponse.json();
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/tags/${secondTagBody.tag.id}`,
+        headers: { cookie },
+        payload: {
+          slug: "first-tag"
+        }
+      });
+      expect(updateResponse.statusCode).toBe(409);
+      expect(updateResponse.json()).toEqual({ message: "Tag already exists" });
     } finally {
       await app.close();
     }

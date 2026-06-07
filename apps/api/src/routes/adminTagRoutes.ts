@@ -41,6 +41,11 @@ function getTagById(app: FastifyInstance, id: number) {
   return row ? mapTag(row) : undefined;
 }
 
+function getTagBySlug(app: FastifyInstance, slug: string) {
+  const row = app.db.prepare("SELECT id, slug, name FROM tags WHERE slug = ?").get(slug) as TagRow | undefined;
+  return row ? mapTag(row) : undefined;
+}
+
 export async function adminTagRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
 
@@ -60,14 +65,17 @@ export async function adminTagRoutes(app: FastifyInstance) {
       reply.code(400).send({ message: "Invalid tag input" });
       return;
     }
+    if (getTagBySlug(app, slug)) {
+      reply.code(409).send({ message: "Tag already exists" });
+      return;
+    }
 
     const name = parsed.data.name ?? slug;
     const now = new Date().toISOString();
     app.db
       .prepare(
         `INSERT INTO tags (slug, name, updated_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT(slug) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`
+         VALUES (?, ?, ?)`
       )
       .run(slug, name, now);
 
@@ -99,6 +107,11 @@ export async function adminTagRoutes(app: FastifyInstance) {
     const slug = parsed.data.slug === undefined ? existing.slug : normalizeSlug(parsed.data.slug);
     if (!slug) {
       reply.code(400).send({ message: "Invalid tag input" });
+      return;
+    }
+    const conflictingTag = getTagBySlug(app, slug);
+    if (conflictingTag && conflictingTag.id !== id) {
+      reply.code(409).send({ message: "Tag already exists" });
       return;
     }
 
