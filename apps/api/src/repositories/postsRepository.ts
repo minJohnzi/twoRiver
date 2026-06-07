@@ -1,0 +1,228 @@
+import { UpsertPostInputSchema, type PostTranslation, type Tag, type UpsertPostInput } from "@tworiver/shared";
+import type { BlogDatabase } from "../db/connection.js";
+import { ensureTags } from "./tagsRepository.js";
+
+export interface PostRecord {
+  id: number;
+  slug: string;
+  status: "draft" | "published";
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  tags: Tag[];
+  translations: PostTranslation[];
+}
+
+interface PostRow {
+  id: number;
+  slug: string;
+  status: "draft" | "published";
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface TranslationRow {
+  locale: "zh" | "en";
+  title: string;
+  summary: string;
+  content_markdown: string;
+  seo_title: string | null;
+  seo_description: string | null;
+}
+
+interface TagRow {
+  id: number;
+  slug: string;
+  name: string;
+}
+
+function mapTranslation(row: TranslationRow): PostTranslation {
+  return {
+    locale: row.locale,
+    title: row.title,
+    summary: row.summary,
+    contentMarkdown: row.content_markdown,
+    seoTitle: row.seo_title,
+    seoDescription: row.seo_description
+  };
+}
+
+function mapTag(row: TagRow): Tag {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name
+  };
+}
+
+function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
+  const translationRows = db
+    .prepare(
+      `SELECT locale, title, summary, content_markdown, seo_title, seo_description
+       FROM post_translations
+       WHERE post_id = ?
+       ORDER BY locale ASC`
+    )
+    .all(row.id) as TranslationRow[];
+
+  const tagRows = db
+    .prepare(
+      `SELECT t.id, t.slug, t.name
+       FROM tags t
+       INNER JOIN post_tags pt ON pt.tag_id = t.id
+       WHERE pt.post_id = ?
+       ORDER BY t.slug ASC`
+    )
+    .all(row.id) as TagRow[];
+
+  return {
+    id: row.id,
+    slug: row.slug,
+    status: row.status,
+    publishedAt: row.published_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    tags: tagRows.map(mapTag),
+    translations: translationRows.map(mapTranslation)
+  };
+}
+
+function replacePostRelations(db: BlogDatabase, postId: number, input: UpsertPostInput, timestamp: string): void {
+  db.prepare("DELETE FROM post_translations WHERE post_id = ?").run(postId);
+  db.prepare("DELETE FROM post_tags WHERE post_id = ?").run(postId);
+
+  const insertTranslation = db.prepare(`
+    INSERT INTO post_translations (
+      post_id,
+      locale,
+      title,
+      summary,
+      content_markdown,
+      seo_title,
+      seo_description,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const translation of input.translations) {
+    insertTranslation.run(
+      postId,
+      translation.locale,
+      translation.title,
+      translation.summary,
+      translation.contentMarkdown,
+      translation.seoTitle,
+      translation.seoDescription,
+      timestamp,
+      timestamp
+    );
+  }
+
+  const tags = ensureTags(db, input.tagSlugs);
+  const insertPostTag = db.prepare("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)");
+  for (const tag of tags) {
+    insertPostTag.run(postId, tag.id);
+  }
+}
+
+export function createPost(db: BlogDatabase, input: unknown): PostRecord {
+  const parsed = UpsertPostInputSchema.parse(input);
+
+  return db.transaction(() => {
+    const now = new Date().toISOString();
+    const result = db
+      .prepare(
+        `INSERT INTO posts (slug, status, published_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .run(parsed.slug, parsed.status, parsed.publishedAt, now, now);
+
+    const postId = Number(result.lastInsertRowid);
+    replacePostRelations(db, postId, parsed, now);
+
+    const post = getAdminPostById(db, postId);
+    if (!post) {
+      throw new Error("Created post could not be loaded.");
+    }
+
+    return post;
+  })();
+}
+
+export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRecord | undefined {
+  const parsed = UpsertPostInputSchema.parse(input);
+
+  return db.transaction(() => {
+    const existing = getPostRowById(db, id);
+    if (!existing) {
+      return undefined;
+    }
+
+    const now = new Date().toISOString();
+    db.prepare("UPDATE posts SET slug = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?").run(
+      parsed.slug,
+      parsed.status,
+      parsed.publishedAt,
+      now,
+      id
+    );
+    replacePostRelations(db, id, parsed, now);
+
+    return getAdminPostById(db, id);
+  })();
+}
+
+export function deletePost(db: BlogDatabase, id: number): void {
+  db.prepare("DELETE FROM posts WHERE id = ?").run(id);
+}
+
+export function listPublicPosts(db: BlogDatabase): PostRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT id, slug, status, published_at, created_at, updated_at
+       FROM posts
+       WHERE status = 'published'
+       ORDER BY published_at DESC, created_at DESC`
+    )
+    .all() as PostRow[];
+
+  return rows.map((row) => hydratePost(db, row));
+}
+
+export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, slug, status, published_at, created_at, updated_at
+       FROM posts
+       WHERE slug = ? AND status = 'published'`
+    )
+    .get(slug) as PostRow | undefined;
+
+  return row ? hydratePost(db, row) : undefined;
+}
+
+export function listAdminPosts(db: BlogDatabase): PostRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT id, slug, status, published_at, created_at, updated_at
+       FROM posts
+       ORDER BY updated_at DESC`
+    )
+    .all() as PostRow[];
+
+  return rows.map((row) => hydratePost(db, row));
+}
+
+export function getAdminPostById(db: BlogDatabase, id: number): PostRecord | undefined {
+  const row = getPostRowById(db, id);
+  return row ? hydratePost(db, row) : undefined;
+}
+
+function getPostRowById(db: BlogDatabase, id: number): PostRow | undefined {
+  return db
+    .prepare("SELECT id, slug, status, published_at, created_at, updated_at FROM posts WHERE id = ?")
+    .get(id) as PostRow | undefined;
+}

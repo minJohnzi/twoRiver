@@ -3,7 +3,10 @@ import Fastify from "fastify";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
 import authPlugin from "./plugins/auth.js";
+import { adminPostRoutes } from "./routes/adminPostRoutes.js";
+import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
+import { publicRoutes } from "./routes/publicRoutes.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -30,6 +33,9 @@ export function buildApp({ config, db }: BuildAppOptions) {
 
   app.register(authPlugin);
   app.register(authRoutes, { config });
+  app.register(publicRoutes);
+  app.register(adminPostRoutes);
+  app.register(adminTagRoutes);
 
   app.get("/api/health", async () => ({
     ok: true,
