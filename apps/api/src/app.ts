@@ -8,8 +8,13 @@ export interface BuildAppOptions {
   db: BlogDatabase;
 }
 
-export function buildApp({ config }: BuildAppOptions) {
+export function buildApp({ config, db }: BuildAppOptions) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
+  app.decorate("db", db);
+
+  app.addHook("onClose", async () => {
+    db.close();
+  });
 
   app.register(cookie, {
     secret: config.SESSION_SECRET
