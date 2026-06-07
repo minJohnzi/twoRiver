@@ -2,6 +2,8 @@ import cookie from "@fastify/cookie";
 import Fastify from "fastify";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
+import authPlugin from "./plugins/auth.js";
+import { authRoutes } from "./routes/authRoutes.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -25,6 +27,9 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(cookie, {
     secret: config.SESSION_SECRET
   });
+
+  app.register(authPlugin);
+  app.register(authRoutes, { config });
 
   app.get("/api/health", async () => ({
     ok: true,

@@ -11,7 +11,7 @@
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
     "migrate": "tsx src/db/migrate.ts",
-    "seed:admin": "echo \"seed:admin is added in the auth task\""
+    "seed:admin": "tsx src/db/seedAdmin.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -19,6 +19,7 @@
     "argon2": "^0.41.1",
     "better-sqlite3": "^11.10.0",
     "fastify": "^5.3.3",
+    "fastify-plugin": "^5.0.1",
     "zod": "^3.25.56"
   },
   "devDependencies": {

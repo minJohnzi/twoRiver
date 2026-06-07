@@ -8,7 +8,7 @@ A minimal bilingual technical blog with a React/Vite frontend, Fastify API, SQLi
 pnpm install
 cp .env.example .env
 pnpm api:migrate
-# Admin seeding is enabled after the auth task is implemented.
+pnpm api:seed-admin
 pnpm dev
 ```
 
