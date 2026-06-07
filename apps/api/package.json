@@ -7,9 +7,9 @@
     "dev": "pnpm --filter @tworiver/shared build && tsx watch src/main.ts",
     "build": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.mkdirSync('dist/src/db',{recursive:true});fs.copyFileSync('src/db/schema.sql','dist/src/db/schema.sql')\"",
     "start": "node dist/src/main.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @tworiver/shared build && vitest run",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit",
     "migrate": "tsx src/db/migrate.ts",
     "seed:admin": "pnpm --filter @tworiver/shared build && tsx src/db/seedAdmin.ts"
   },
