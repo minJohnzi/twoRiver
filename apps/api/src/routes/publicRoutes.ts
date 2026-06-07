@@ -8,7 +8,9 @@ interface SlugParams {
 }
 
 export async function publicRoutes(app: FastifyInstance) {
-  app.get("/api/posts", async () => listPublicPosts(app.db));
+  app.get("/api/posts", async () => ({
+    posts: listPublicPosts(app.db)
+  }));
 
   app.get<{ Params: SlugParams }>("/api/posts/:slug", async (request, reply) => {
     const post = getPublicPostBySlug(app.db, normalizeSlug(request.params.slug));
@@ -17,8 +19,10 @@ export async function publicRoutes(app: FastifyInstance) {
       return;
     }
 
-    return post;
+    return { post };
   });
 
-  app.get("/api/tags", async () => listTags(app.db));
+  app.get("/api/tags", async () => ({
+    tags: listTags(app.db)
+  }));
 }

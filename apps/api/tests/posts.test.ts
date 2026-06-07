@@ -99,7 +99,7 @@ describe("post routes", () => {
       });
 
       expect(listResponse.statusCode).toBe(200);
-      expect(listResponse.json()).toEqual([]);
+      expect(listResponse.json()).toEqual({ posts: [] });
     } finally {
       await app.close();
     }
@@ -150,11 +150,11 @@ describe("post routes", () => {
 
       expect(detailResponse.statusCode).toBe(200);
       const body = detailResponse.json();
-      expect(body.slug).toBe("published-bilingual");
-      expect(body.publishedAt).toBe(publishedAt);
-      expect(body.tags.map((tag: { slug: string }) => tag.slug)).toEqual(["culture", "river"]);
-      expect(body.translations).toHaveLength(2);
-      expect(body.translations).toEqual(
+      expect(body.post.slug).toBe("published-bilingual");
+      expect(body.post.publishedAt).toBe(publishedAt);
+      expect(body.post.tags.map((tag: { slug: string }) => tag.slug)).toEqual(["culture", "river"]);
+      expect(body.post.translations).toHaveLength(2);
+      expect(body.post.translations).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             locale: "en",

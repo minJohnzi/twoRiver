@@ -20,7 +20,9 @@ function parseId(id: string): number | undefined {
 export async function adminPostRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
 
-  app.get("/api/admin/posts", async () => listAdminPosts(app.db));
+  app.get("/api/admin/posts", async () => ({
+    posts: listAdminPosts(app.db)
+  }));
 
   app.post("/api/admin/posts", async (request, reply) => {
     const parsed = UpsertPostInputSchema.safeParse(request.body);
@@ -31,7 +33,7 @@ export async function adminPostRoutes(app: FastifyInstance) {
 
     const post = createPost(app.db, parsed.data);
     reply.code(201);
-    return post;
+    return { post };
   });
 
   app.get<{ Params: IdParams }>("/api/admin/posts/:id", async (request, reply) => {
@@ -47,7 +49,7 @@ export async function adminPostRoutes(app: FastifyInstance) {
       return;
     }
 
-    return post;
+    return { post };
   });
 
   app.put<{ Params: IdParams }>("/api/admin/posts/:id", async (request, reply) => {
@@ -68,7 +70,7 @@ export async function adminPostRoutes(app: FastifyInstance) {
       return;
     }
 
-    return post;
+    return { post };
   });
 
   app.delete<{ Params: IdParams }>("/api/admin/posts/:id", async (request) => {
