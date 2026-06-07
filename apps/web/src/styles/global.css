@@ -1,0 +1,239 @@
+:root {
+  color: #1f2933;
+  background: #fbfbfa;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #fbfbfa;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: #1d4f7a;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  color: #143a5d;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.site-header {
+  border-bottom: 1px solid #e3e0d9;
+  background: rgba(251, 251, 250, 0.94);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(12px);
+}
+
+.site-header__inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 14px 24px;
+}
+
+.brand {
+  color: #15191f;
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.site-nav a {
+  color: #4d5865;
+  font-size: 0.94rem;
+  text-decoration: none;
+}
+
+.site-nav a.active,
+.site-nav a:hover {
+  color: #15191f;
+}
+
+.language-toggle,
+.tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-toggle button,
+.tag-filter button {
+  border: 1px solid #d6d2c9;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #4d5865;
+  cursor: pointer;
+  font-size: 0.88rem;
+  line-height: 1;
+  padding: 8px 11px;
+}
+
+.language-toggle button:hover,
+.tag-filter button:hover,
+.language-toggle button.is-active,
+.tag-filter button.is-active {
+  border-color: #1d4f7a;
+  color: #143a5d;
+}
+
+.site-main {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 48px 24px 72px;
+}
+
+.page-section,
+.article-shell {
+  max-width: 720px;
+}
+
+.page-heading {
+  margin-bottom: 28px;
+}
+
+.page-heading h1,
+.page-section h1,
+.article-header h1 {
+  margin: 0;
+  color: #15191f;
+  font-size: clamp(2rem, 6vw, 3.25rem);
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+.page-heading p,
+.article-header p,
+.page-section p {
+  color: #56616f;
+  font-size: 1.05rem;
+}
+
+.post-list {
+  display: grid;
+  gap: 0;
+  margin-top: 28px;
+}
+
+.post-list__item {
+  border-top: 1px solid #e3e0d9;
+  padding: 26px 0;
+}
+
+.post-list__item:last-child {
+  border-bottom: 1px solid #e3e0d9;
+}
+
+.post-list__item h2 {
+  margin: 8px 0;
+  color: #15191f;
+  font-size: 1.45rem;
+  line-height: 1.25;
+}
+
+.post-list__item h2 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.post-list__item h2 a:hover {
+  color: #1d4f7a;
+}
+
+.post-list__item p {
+  margin: 0;
+  color: #56616f;
+}
+
+.post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: #717b87;
+  font-size: 0.88rem;
+}
+
+.article-header {
+  border-bottom: 1px solid #e3e0d9;
+  margin-bottom: 32px;
+  padding-bottom: 28px;
+}
+
+.article-header h1 {
+  margin-top: 12px;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 28px;
+  font-size: 0.94rem;
+}
+
+.muted {
+  color: #717b87;
+}
+
+.error-text {
+  color: #b42318;
+}
+
+@media (max-width: 680px) {
+  .site-header__inner {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 18px;
+  }
+
+  .site-nav {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .language-toggle {
+    margin-left: auto;
+  }
+
+  .site-main {
+    padding: 34px 18px 56px;
+  }
+
+  .post-list__item {
+    padding: 22px 0;
+  }
+}

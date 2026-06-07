@@ -1,0 +1,33 @@
+{
+  "name": "@tworiver/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @tworiver/shared build && vite --host 0.0.0.0",
+    "build": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @tworiver/shared build && vitest run",
+    "lint": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tworiver/shared": "workspace:*",
+    "@vitejs/plugin-react": "^4.5.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.12",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.1"
+  }
+}
