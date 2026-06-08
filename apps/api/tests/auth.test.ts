@@ -18,6 +18,7 @@ function makeConfig(databasePath: string): AppConfig {
     SESSION_SECRET: "test-session-secret-at-least-32-chars",
     ADMIN_USERNAME: "admin",
     ADMIN_PASSWORD: "secret1234567",
+    CORS_ALLOWED_ORIGINS: [],
     DEEPSEEK_BASE_URL: "https://api.deepseek.com"
   };
 }
@@ -76,11 +77,17 @@ describe("auth routes", () => {
       });
 
       const setCookie = loginResponse.headers["set-cookie"];
-      const sessionCookie = Array.isArray(setCookie) ? setCookie[0] : String(setCookie ?? "");
+      const cookies = Array.isArray(setCookie) ? setCookie : [String(setCookie ?? "")];
+      const sessionCookie = cookies.find((cookie) => cookie.startsWith("tworiver_session=")) ?? "";
+      const csrfCookie = cookies.find((cookie) => cookie.startsWith("tworiver_csrf=")) ?? "";
       expect(sessionCookie).toContain("tworiver_session=");
       expect(sessionCookie).toContain("HttpOnly");
       expect(sessionCookie).toContain("Path=/");
       expect(sessionCookie).toContain("SameSite=Lax");
+      expect(csrfCookie).toContain("tworiver_csrf=");
+      expect(csrfCookie).not.toContain("HttpOnly");
+      expect(csrfCookie).toContain("Path=/");
+      expect(csrfCookie).toContain("SameSite=Lax");
 
       const cookieHeader = sessionCookie?.split(";")[0];
       expect(cookieHeader).toBeDefined();
@@ -103,6 +110,109 @@ describe("auth routes", () => {
           username: "admin"
         }
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("sets security headers and only allows trusted credentialed CORS origins", async () => {
+    const databasePath = createDatabasePath();
+    migrate(databasePath);
+    const db = openDatabase(databasePath);
+    await seedAdmin(db, "admin", "secret1234567");
+
+    const app = buildApp({
+      config: {
+        ...makeConfig(databasePath),
+        CORS_ALLOWED_ORIGINS: ["https://blog.example.com"]
+      },
+      db
+    });
+
+    try {
+      const trustedResponse = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: {
+          origin: "https://blog.example.com"
+        }
+      });
+
+      expect(trustedResponse.headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+      expect(trustedResponse.headers["x-content-type-options"]).toBe("nosniff");
+      expect(trustedResponse.headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+      expect(trustedResponse.headers["x-frame-options"]).toBe("DENY");
+      expect(trustedResponse.headers["access-control-allow-origin"]).toBe("https://blog.example.com");
+      expect(trustedResponse.headers["access-control-allow-credentials"]).toBe("true");
+
+      const untrustedResponse = await app.inject({
+        method: "GET",
+        url: "/api/health",
+        headers: {
+          origin: "https://evil.example.com"
+        }
+      });
+
+      expect(untrustedResponse.headers["access-control-allow-origin"]).toBeUndefined();
+      expect(untrustedResponse.headers["access-control-allow-credentials"]).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("requires CSRF token for logout and accepts the matching token", async () => {
+    const databasePath = createDatabasePath();
+    migrate(databasePath);
+    const db = openDatabase(databasePath);
+    await seedAdmin(db, "admin", "secret1234567");
+
+    const app = buildApp({ config: makeConfig(databasePath), db });
+
+    try {
+      const loginResponse = await app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: {
+          username: "admin",
+          password: "secret1234567"
+        }
+      });
+      expect(loginResponse.statusCode).toBe(200);
+
+      const cookies = Array.isArray(loginResponse.headers["set-cookie"])
+        ? loginResponse.headers["set-cookie"]
+        : [String(loginResponse.headers["set-cookie"] ?? "")];
+      const sessionCookie = cookies.find((cookie) => cookie.startsWith("tworiver_session="))?.split(";")[0];
+      const csrfCookie = cookies.find((cookie) => cookie.startsWith("tworiver_csrf="))?.split(";")[0];
+      if (!sessionCookie || !csrfCookie) {
+        throw new Error("Expected login response to set session and CSRF cookies.");
+      }
+      const cookie = `${sessionCookie}; ${csrfCookie}`;
+      const csrfToken = csrfCookie.slice("tworiver_csrf=".length);
+
+      const missingTokenResponse = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: { cookie }
+      });
+      expect(missingTokenResponse.statusCode).toBe(403);
+      expect(missingTokenResponse.json()).toEqual({ message: "Invalid CSRF token" });
+
+      const wrongTokenResponse = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: { cookie, "x-csrf-token": "wrong-token" }
+      });
+      expect(wrongTokenResponse.statusCode).toBe(403);
+      expect(wrongTokenResponse.json()).toEqual({ message: "Invalid CSRF token" });
+
+      const logoutResponse = await app.inject({
+        method: "POST",
+        url: "/api/auth/logout",
+        headers: { cookie, "x-csrf-token": csrfToken }
+      });
+      expect(logoutResponse.statusCode).toBe(200);
+      expect(logoutResponse.json()).toEqual({ ok: true });
     } finally {
       await app.close();
     }

@@ -1,6 +1,13 @@
-import { UpsertPostInputSchema, type PostTranslation, type Tag, type UpsertPostInput } from "@tworiver/shared";
+import {
+  UpsertPostInputSchema,
+  type Category,
+  type PostTranslation,
+  type Tag,
+  type UpsertPostInput
+} from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
 import { normalizeSlug } from "../services/slugService.js";
+import { ensureCategory } from "./categoriesRepository.js";
 import { ensureTags } from "./tagsRepository.js";
 
 export interface PostRecord {
@@ -10,6 +17,7 @@ export interface PostRecord {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  category: Category | null;
   tags: Tag[];
   translations: PostTranslation[];
 }
@@ -18,6 +26,7 @@ interface PostRow {
   id: number;
   slug: string;
   status: "draft" | "published";
+  category_id: number | null;
   published_at: string | null;
   created_at: string;
   updated_at: string;
@@ -33,6 +42,12 @@ interface TranslationRow {
 }
 
 interface TagRow {
+  id: number;
+  slug: string;
+  name: string;
+}
+
+interface CategoryRow {
   id: number;
   slug: string;
   name: string;
@@ -71,6 +86,14 @@ function mapTag(row: TagRow): Tag {
   };
 }
 
+function mapCategory(row: CategoryRow): Category {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name
+  };
+}
+
 function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
   const translationRows = db
     .prepare(
@@ -91,6 +114,13 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
     )
     .all(row.id) as TagRow[];
 
+  const categoryRow =
+    row.category_id === null
+      ? undefined
+      : (db.prepare("SELECT id, slug, name FROM categories WHERE id = ?").get(row.category_id) as
+          | CategoryRow
+          | undefined);
+
   return {
     id: row.id,
     slug: row.slug,
@@ -98,6 +128,7 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
     publishedAt: row.published_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    category: categoryRow ? mapCategory(categoryRow) : null,
     tags: tagRows.map(mapTag),
     translations: translationRows.map(mapTranslation)
   };
@@ -157,6 +188,10 @@ function validatePostInput(input: UpsertPostInput): void {
       throw new InvalidPostInputError();
     }
   }
+
+  if (input.categorySlug !== null && !normalizeSlug(input.categorySlug)) {
+    throw new InvalidPostInputError();
+  }
 }
 
 function postSlugExists(db: BlogDatabase, slug: string, excludedPostId?: number): boolean {
@@ -180,12 +215,13 @@ export function createPost(db: BlogDatabase, input: unknown): PostRecord {
     }
 
     const now = new Date().toISOString();
+    const category = ensureCategory(db, parsed.categorySlug);
     const result = db
       .prepare(
-        `INSERT INTO posts (slug, status, published_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(parsed.slug, parsed.status, parsed.publishedAt, now, now);
+      .run(parsed.slug, parsed.status, category?.id ?? null, parsed.publishedAt, now, now);
 
     const postId = Number(result.lastInsertRowid);
     replacePostRelations(db, postId, parsed, now);
@@ -213,9 +249,11 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
     }
 
     const now = new Date().toISOString();
-    db.prepare("UPDATE posts SET slug = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?").run(
+    const category = ensureCategory(db, parsed.categorySlug);
+    db.prepare("UPDATE posts SET slug = ?, status = ?, category_id = ?, published_at = ?, updated_at = ? WHERE id = ?").run(
       parsed.slug,
       parsed.status,
+      category?.id ?? null,
       parsed.publishedAt,
       now,
       id
@@ -226,14 +264,15 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
   })();
 }
 
-export function deletePost(db: BlogDatabase, id: number): void {
-  db.prepare("DELETE FROM posts WHERE id = ?").run(id);
+export function deletePost(db: BlogDatabase, id: number): boolean {
+  const result = db.prepare("DELETE FROM posts WHERE id = ?").run(id);
+  return result.changes > 0;
 }
 
 export function listPublicPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, slug, status, published_at, created_at, updated_at
+      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        WHERE status = 'published'
        ORDER BY published_at DESC, created_at DESC`
@@ -243,10 +282,39 @@ export function listPublicPosts(db: BlogDatabase): PostRecord[] {
   return rows.map((row) => hydratePost(db, row));
 }
 
+export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): PostRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+       FROM posts p
+       INNER JOIN categories c ON c.id = p.category_id
+       WHERE p.status = 'published' AND c.slug = ?
+       ORDER BY p.published_at DESC, p.created_at DESC`
+    )
+    .all(slug) as PostRow[];
+
+  return rows.map((row) => hydratePost(db, row));
+}
+
+export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+       FROM posts p
+       INNER JOIN post_tags pt ON pt.post_id = p.id
+       INNER JOIN tags t ON t.id = pt.tag_id
+       WHERE p.status = 'published' AND t.slug = ?
+       ORDER BY p.published_at DESC, p.created_at DESC`
+    )
+    .all(slug) as PostRow[];
+
+  return rows.map((row) => hydratePost(db, row));
+}
+
 export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord | undefined {
   const row = db
     .prepare(
-      `SELECT id, slug, status, published_at, created_at, updated_at
+      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        WHERE slug = ? AND status = 'published'`
     )
@@ -258,7 +326,7 @@ export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord 
 export function listAdminPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, slug, status, published_at, created_at, updated_at
+      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        ORDER BY updated_at DESC`
     )
@@ -274,6 +342,6 @@ export function getAdminPostById(db: BlogDatabase, id: number): PostRecord | und
 
 function getPostRowById(db: BlogDatabase, id: number): PostRow | undefined {
   return db
-    .prepare("SELECT id, slug, status, published_at, created_at, updated_at FROM posts WHERE id = ?")
+    .prepare("SELECT id, slug, status, category_id, published_at, created_at, updated_at FROM posts WHERE id = ?")
     .get(id) as PostRow | undefined;
 }

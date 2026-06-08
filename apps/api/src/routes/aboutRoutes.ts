@@ -10,6 +10,7 @@ export async function publicAboutRoutes(app: FastifyInstance) {
 
 export async function adminAboutRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
+  app.addHook("preHandler", app.requireCsrf);
 
   app.get("/api/admin/about", async () => ({
     about: getAboutProfile(app.db)

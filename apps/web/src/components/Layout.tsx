@@ -7,11 +7,21 @@ interface LayoutProps {
   children: ReactNode;
   locale: Locale;
   theme: "dark" | "light";
+  isAdminAuthenticated?: boolean;
   onLocaleChange: (locale: Locale) => void;
   onThemeChange: (theme: "dark" | "light") => void;
+  onLogout?: () => void;
 }
 
-export function Layout({ children, locale, theme, onLocaleChange, onThemeChange }: LayoutProps) {
+export function Layout({
+  children,
+  locale,
+  theme,
+  isAdminAuthenticated = false,
+  onLocaleChange,
+  onThemeChange,
+  onLogout
+}: LayoutProps) {
   const { pathname } = useLocation();
   const isAdminRoute = pathname.startsWith("/admin");
   const nextTheme = theme === "dark" ? "light" : "dark";
@@ -27,6 +37,8 @@ export function Layout({ children, locale, theme, onLocaleChange, onThemeChange 
             <NavLink to="/" end>
               writing
             </NavLink>
+            <NavLink to="/categories">categories</NavLink>
+            <NavLink to="/tags">tags</NavLink>
             <NavLink to="/about">about</NavLink>
             <button
               type="button"
@@ -37,6 +49,11 @@ export function Layout({ children, locale, theme, onLocaleChange, onThemeChange 
               {theme === "dark" ? "light" : "dark"}
             </button>
             <LanguageToggle locale={locale} onLocaleChange={onLocaleChange} />
+            {isAdminRoute && isAdminAuthenticated ? (
+              <button type="button" className="theme-toggle" onClick={onLogout}>
+                Logout
+              </button>
+            ) : null}
           </nav>
         </header>
         {children}

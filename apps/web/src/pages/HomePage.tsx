@@ -1,4 +1,4 @@
-import type { Locale, PublicPostListItem, PostTranslation, Tag } from "@tworiver/shared";
+import type { Locale, PostTranslation, PublicPostListItem, Tag } from "@tworiver/shared";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchPosts, fetchTags } from "../api/posts";
@@ -8,10 +8,7 @@ interface HomePageProps {
   locale: Locale;
 }
 
-function findTranslation(
-  translations: PostTranslation[],
-  locale: Locale
-): PostTranslation | undefined {
+function findTranslation(translations: PostTranslation[], locale: Locale): PostTranslation | undefined {
   return (
     translations.find((translation) => translation.locale === locale) ??
     translations.find((translation) => translation.locale === "zh") ??
@@ -46,10 +43,7 @@ export function HomePage({ locale }: HomePageProps) {
       setError(null);
 
       try {
-        const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([
-          fetchPosts(),
-          fetchTags()
-        ]);
+        const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([fetchPosts(), fetchTags()]);
 
         if (isMounted) {
           setPosts(nextPosts);
@@ -115,6 +109,7 @@ export function HomePage({ locale }: HomePageProps) {
                 <article className="post-list__item" key={post.id}>
                   <div className="post-row-meta">
                     <time dateTime={post.publishedAt ?? undefined}>{formatDate(post.publishedAt, locale)}</time>
+                    {post.category ? <span>{post.category.name}</span> : null}
                     {post.tags.length > 0 ? <span>{post.tags.map((tag) => tag.name).join(", ")}</span> : null}
                   </div>
                   <h3>

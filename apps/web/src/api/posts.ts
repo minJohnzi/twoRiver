@@ -1,4 +1,4 @@
-import type { AboutProfile, PublicPost, PublicPostListItem, Tag } from "@tworiver/shared";
+import type { AboutProfile, Category, PublicPost, PublicPostListItem, Tag } from "@tworiver/shared";
 import { apiRequest } from "./client";
 
 export function fetchPosts() {
@@ -11,6 +11,18 @@ export function fetchPost(slug: string) {
 
 export function fetchTags() {
   return apiRequest<{ tags: Tag[] }>("/api/tags");
+}
+
+export function fetchTagDetail(slug: string) {
+  return apiRequest<{ tag: Tag; posts: PublicPostListItem[] }>(`/api/tags/${slug}`);
+}
+
+export function fetchCategories() {
+  return apiRequest<{ categories: Category[] }>("/api/categories");
+}
+
+export function fetchCategoryDetail(slug: string) {
+  return apiRequest<{ category: Category; posts: PublicPostListItem[] }>(`/api/categories/${slug}`);
 }
 
 export function fetchAboutProfile() {

@@ -48,6 +48,7 @@ function getTagBySlug(app: FastifyInstance, slug: string) {
 
 export async function adminTagRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
+  app.addHook("preHandler", app.requireCsrf);
 
   app.get("/api/admin/tags", async () => ({
     tags: listTags(app.db)
@@ -128,10 +129,17 @@ export async function adminTagRoutes(app: FastifyInstance) {
     return { tag };
   });
 
-  app.delete<{ Params: IdParams }>("/api/admin/tags/:id", async (request) => {
+  app.delete<{ Params: IdParams }>("/api/admin/tags/:id", async (request, reply) => {
     const id = parseId(request.params.id);
-    if (id) {
-      app.db.prepare("DELETE FROM tags WHERE id = ?").run(id);
+    if (!id) {
+      reply.code(404).send({ message: "Tag not found" });
+      return;
+    }
+
+    const result = app.db.prepare("DELETE FROM tags WHERE id = ?").run(id);
+    if (result.changes === 0) {
+      reply.code(404).send({ message: "Tag not found" });
+      return;
     }
 
     return { ok: true };

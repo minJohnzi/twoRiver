@@ -8,12 +8,14 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:e2e": "playwright test",
     "lint": "pnpm -r lint",
     "api:migrate": "pnpm --filter @tworiver/api migrate",
     "api:seed-admin": "pnpm --filter @tworiver/api seed:admin"
   },
   "packageManager": "pnpm@9.15.4",
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "typescript": "^5.8.3"
   }
 }

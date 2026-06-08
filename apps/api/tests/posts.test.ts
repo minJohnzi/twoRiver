@@ -19,6 +19,7 @@ function makeConfig(databasePath: string): AppConfig {
     SESSION_SECRET: "test-session-secret-at-least-32-chars",
     ADMIN_USERNAME: "admin",
     ADMIN_PASSWORD: "secret1234567",
+    CORS_ALLOWED_ORIGINS: [],
     DEEPSEEK_BASE_URL: "https://api.deepseek.com"
   };
 }
@@ -59,6 +60,37 @@ async function login(app: FastifyInstance): Promise<string> {
   return cookieHeader;
 }
 
+function extractCookie(setCookie: string | string[] | undefined, name: string): string {
+  const cookies = Array.isArray(setCookie) ? setCookie : [String(setCookie ?? "")];
+  const cookie = cookies.find((value) => value.startsWith(`${name}=`));
+  const cookieHeader = cookie?.split(";")[0];
+  if (!cookieHeader) {
+    throw new Error(`Expected ${name} cookie to be set.`);
+  }
+  return cookieHeader;
+}
+
+async function loginWithCsrf(app: FastifyInstance): Promise<{ cookie: string; csrfToken: string }> {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    payload: {
+      username: "admin",
+      password: "secret1234567"
+    }
+  });
+
+  expect(response.statusCode).toBe(200);
+  const sessionCookie = extractCookie(response.headers["set-cookie"], "tworiver_session");
+  const csrfCookie = extractCookie(response.headers["set-cookie"], "tworiver_csrf");
+  const csrfToken = csrfCookie.slice("tworiver_csrf=".length);
+
+  return {
+    cookie: `${sessionCookie}; ${csrfCookie}`,
+    csrfToken
+  };
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -66,15 +98,47 @@ afterEach(() => {
 });
 
 describe("post routes", () => {
-  test("hides drafts from public list", async () => {
+  test("rejects authenticated admin post mutations without a CSRF header", async () => {
     const app = await createTestApp();
 
     try {
       const cookie = await login(app);
-      const createResponse = await app.inject({
+      const response = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
         headers: { cookie },
+        payload: {
+          slug: "csrf-missing",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "Missing CSRF",
+              summary: "",
+              contentMarkdown: ""
+            }
+          ]
+        }
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ message: "Invalid CSRF token" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("hides drafts from public list", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "draft-post",
           status: "draft",
@@ -109,16 +173,17 @@ describe("post routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const publishedAt = new Date("2026-01-02T03:04:05.000Z").toISOString();
       const createResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "published-bilingual",
           status: "published",
           publishedAt,
+          categorySlug: "engineering",
           tagSlugs: ["culture", "river"],
           translations: [
             {
@@ -152,6 +217,7 @@ describe("post routes", () => {
       const body = detailResponse.json();
       expect(body.post.slug).toBe("published-bilingual");
       expect(body.post.publishedAt).toBe(publishedAt);
+      expect(body.post.category).toEqual(expect.objectContaining({ slug: "engineering", name: "engineering" }));
       expect(body.post.tags.map((tag: { slug: string }) => tag.slug)).toEqual(["culture", "river"]);
       expect(body.post.translations).toHaveLength(2);
       expect(body.post.translations).toEqual(
@@ -177,11 +243,11 @@ describe("post routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const firstPostResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "duplicate-post",
           status: "draft",
@@ -202,7 +268,7 @@ describe("post routes", () => {
       const secondPostResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "second-post",
           status: "draft",
@@ -223,7 +289,7 @@ describe("post routes", () => {
       const duplicateCreateResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "duplicate-post",
           status: "draft",
@@ -246,7 +312,7 @@ describe("post routes", () => {
       const duplicateUpdateResponse = await app.inject({
         method: "PUT",
         url: `/api/admin/posts/${secondPostBody.post.id}`,
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "duplicate-post",
           status: "draft",
@@ -273,11 +339,11 @@ describe("post routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const response = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "duplicate-locales",
           status: "draft",
@@ -318,11 +384,11 @@ describe("post routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const response = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "empty-tag-slug",
           status: "draft",
@@ -345,14 +411,82 @@ describe("post routes", () => {
       await app.close();
     }
   });
+
+  test("returns 404 when deleting a missing admin post", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/posts/999",
+        headers: { cookie, "x-csrf-token": csrfToken }
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ message: "Post not found" });
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe("tag routes", () => {
+  test("rejects admin tag mutations with missing or invalid CSRF tokens", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: { slug: "security", name: "Security" }
+      });
+      expect(createResponse.statusCode).toBe(201);
+      const tagId = createResponse.json().tag.id as number;
+
+      for (const request of [
+        {
+          method: "POST" as const,
+          url: "/api/admin/tags",
+          payload: { slug: "missing-token", name: "Missing token" }
+        },
+        {
+          method: "PUT" as const,
+          url: `/api/admin/tags/${tagId}`,
+          payload: { name: "Missing token" }
+        },
+        {
+          method: "DELETE" as const,
+          url: `/api/admin/tags/${tagId}`
+        }
+      ]) {
+        const response = await app.inject({
+          ...request,
+          headers: { cookie }
+        });
+        expect(response.statusCode).toBe(403);
+        expect(response.json()).toEqual({ message: "Invalid CSRF token" });
+      }
+
+      const wrongTokenResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/tags/${tagId}`,
+        headers: { cookie, "x-csrf-token": "wrong-token" }
+      });
+      expect(wrongTokenResponse.statusCode).toBe(403);
+      expect(wrongTokenResponse.json()).toEqual({ message: "Invalid CSRF token" });
+    } finally {
+      await app.close();
+    }
+  });
+
   test("authenticated admin tag list, create, and update return envelopes", async () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
 
       const initialListResponse = await app.inject({
         method: "GET",
@@ -365,7 +499,7 @@ describe("tag routes", () => {
       const createResponse = await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "Type   Script!!! Guide",
           name: "Zulu"
@@ -383,7 +517,7 @@ describe("tag routes", () => {
       const updateResponse = await app.inject({
         method: "PUT",
         url: `/api/admin/tags/${createdBody.tag.id}`,
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           name: "Alpha"
         }
@@ -421,12 +555,12 @@ describe("tag routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
 
       await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "a-slug",
           name: "Zulu"
@@ -435,7 +569,7 @@ describe("tag routes", () => {
       await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "z-slug",
           name: "Alpha"
@@ -465,16 +599,78 @@ describe("tag routes", () => {
     }
   });
 
+  test("returns tag detail with only published posts in that tag", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "published-release",
+          status: "published",
+          publishedAt: new Date("2026-03-03T00:00:00.000Z").toISOString(),
+          tagSlugs: ["release"],
+          translations: [{ locale: "en", title: "Published Release", summary: "", contentMarkdown: "" }]
+        }
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "draft-release",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: ["release"],
+          translations: [{ locale: "en", title: "Draft Release", summary: "", contentMarkdown: "" }]
+        }
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "published-other",
+          status: "published",
+          publishedAt: new Date("2026-03-04T00:00:00.000Z").toISOString(),
+          tagSlugs: ["other"],
+          translations: [{ locale: "en", title: "Published Other", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/tags/release"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().tag).toEqual(expect.objectContaining({ slug: "release" }));
+      expect(response.json().posts.map((post: { slug: string }) => post.slug)).toEqual(["published-release"]);
+
+      const missingResponse = await app.inject({
+        method: "GET",
+        url: "/api/tags/missing"
+      });
+      expect(missingResponse.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
   test("post tag creation upserts display names for matching normalized slugs", async () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
 
       const firstPostResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "first-tag-post",
           status: "draft",
@@ -495,7 +691,7 @@ describe("tag routes", () => {
       const secondPostResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "second-tag-post",
           status: "draft",
@@ -536,11 +732,11 @@ describe("tag routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const createResponse = await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "TypeScript",
           name: "TypeScript"
@@ -551,7 +747,7 @@ describe("tag routes", () => {
       const duplicateResponse = await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "typeSCRIPT",
           name: "Different display"
@@ -568,11 +764,11 @@ describe("tag routes", () => {
     const app = await createTestApp();
 
     try {
-      const cookie = await login(app);
+      const { cookie, csrfToken } = await loginWithCsrf(app);
       const firstTagResponse = await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "first-tag",
           name: "First"
@@ -583,7 +779,7 @@ describe("tag routes", () => {
       const secondTagResponse = await app.inject({
         method: "POST",
         url: "/api/admin/tags",
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "second-tag",
           name: "Second"
@@ -595,13 +791,31 @@ describe("tag routes", () => {
       const updateResponse = await app.inject({
         method: "PUT",
         url: `/api/admin/tags/${secondTagBody.tag.id}`,
-        headers: { cookie },
+        headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
           slug: "first-tag"
         }
       });
       expect(updateResponse.statusCode).toBe(409);
       expect(updateResponse.json()).toEqual({ message: "Tag already exists" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns 404 when deleting a missing admin tag", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/tags/999",
+        headers: { cookie, "x-csrf-token": csrfToken }
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({ message: "Tag not found" });
     } finally {
       await app.close();
     }

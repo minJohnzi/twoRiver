@@ -1,7 +1,8 @@
-import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import { marked } from "marked";
 import { useMemo } from "react";
+import { hljs } from "../utils/highlight";
+import { sanitizeMarkdownHtml } from "../utils/sanitizeMarkdown";
 
 marked.use({
   renderer: {
@@ -23,7 +24,7 @@ interface MarkdownPreviewProps {
 
 export function MarkdownPreview({ markdown }: MarkdownPreviewProps) {
   const renderedMarkdown = useMemo(() => {
-    return marked.parse(markdown, { async: false }) as string;
+    return sanitizeMarkdownHtml(marked.parse(markdown, { async: false }) as string);
   }, [markdown]);
 
   return <article className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />;

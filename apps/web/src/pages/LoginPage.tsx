@@ -26,7 +26,10 @@ export function LoginPage({ locale }: LoginPageProps) {
     signal: locale === "zh" ? "安全会话" : "Secure session",
     signalText: locale === "zh" ? "登录后将创建仅用于后台编辑的会话。" : "A dedicated editor session starts after login.",
     checkpoint: locale === "zh" ? "今日检查" : "Today check",
-    checkpointText: locale === "zh" ? "草稿、标签与翻译状态保持同步。" : "Drafts, tags, and translations stay aligned.",
+    checkpointText:
+      locale === "zh"
+        ? "草稿、标签、分类与翻译状态保持同步。"
+        : "Drafts, tags, categories, and translations stay aligned."
   };
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

@@ -269,6 +269,41 @@ a:hover {
   line-height: 1.72;
 }
 
+.taxonomy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.taxonomy-card {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-admin-panel);
+  padding: 16px;
+  text-decoration: none;
+}
+
+.taxonomy-card:hover {
+  border-color: var(--color-admin-accent);
+}
+
+.taxonomy-card strong {
+  color: var(--color-heading);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.taxonomy-card span {
+  color: var(--color-subtle);
+  font-size: 13px;
+}
+
+.not-found {
+  display: grid;
+  gap: 16px;
+}
+
 .content-grid {
   display: grid;
   gap: 36px;

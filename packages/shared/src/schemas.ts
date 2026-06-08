@@ -15,6 +15,13 @@ export const TagSchema = z.object({
 });
 export type Tag = z.infer<typeof TagSchema>;
 
+export const CategorySchema = z.object({
+  id: z.number().int().positive(),
+  slug: z.string().min(1),
+  name: z.string().min(1)
+});
+export type Category = z.infer<typeof CategorySchema>;
+
 export const PostTranslationSchema = z.object({
   locale: LocaleSchema,
   title: z.string().min(1),
@@ -30,6 +37,7 @@ export const PublicPostListItemSchema = z.object({
   slug: z.string().min(1),
   status: PostStatusSchema,
   publishedAt: DateTimeStringSchema.nullable(),
+  category: CategorySchema.nullable(),
   tags: z.array(TagSchema),
   translations: z.array(PostTranslationSchema)
 });
@@ -76,6 +84,7 @@ export const UpsertPostInputSchema = z.object({
   slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   status: PostStatusSchema,
   publishedAt: DateTimeStringSchema.nullable(),
+  categorySlug: z.string().min(1).nullable().default(null),
   tagSlugs: z.array(z.string().min(1)).default([]),
   translations: z.array(PostTranslationSchema).min(1)
 });

@@ -34,6 +34,7 @@ function sendPostError(error: unknown, reply: FastifyReply): boolean {
 
 export async function adminPostRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
+  app.addHook("preHandler", app.requireCsrf);
 
   app.get("/api/admin/posts", async () => ({
     posts: listAdminPosts(app.db)
@@ -102,10 +103,16 @@ export async function adminPostRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete<{ Params: IdParams }>("/api/admin/posts/:id", async (request) => {
+  app.delete<{ Params: IdParams }>("/api/admin/posts/:id", async (request, reply) => {
     const id = parseId(request.params.id);
-    if (id) {
-      deletePost(app.db, id);
+    if (!id) {
+      reply.code(404).send({ message: "Post not found" });
+      return;
+    }
+
+    if (!deletePost(app.db, id)) {
+      reply.code(404).send({ message: "Post not found" });
+      return;
     }
 
     return { ok: true };

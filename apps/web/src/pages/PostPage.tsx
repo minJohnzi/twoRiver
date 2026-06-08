@@ -1,10 +1,11 @@
 import type { Locale, PostTranslation, PublicPost } from "@tworiver/shared";
-import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import { marked } from "marked";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchPost } from "../api/posts";
+import { hljs } from "../utils/highlight";
+import { sanitizeMarkdownHtml } from "../utils/sanitizeMarkdown";
 
 marked.use({
   renderer: {
@@ -89,7 +90,7 @@ export function PostPage({ locale }: PostPageProps) {
 
   const translation = post ? findTranslation(post.translations, locale) : undefined;
   const renderedMarkdown = useMemo(() => {
-    return marked.parse(translation?.contentMarkdown ?? "", { async: false }) as string;
+    return sanitizeMarkdownHtml(marked.parse(translation?.contentMarkdown ?? "", { async: false }) as string);
   }, [translation?.contentMarkdown]);
 
   if (isLoading) {
@@ -119,6 +120,7 @@ export function PostPage({ locale }: PostPageProps) {
       <header className="article-header">
         <div className="post-meta">
           {publishedDate ? <time dateTime={post.publishedAt ?? undefined}>{publishedDate}</time> : null}
+          {post.category ? <span>{post.category.name}</span> : null}
           {post.tags.length > 0 ? (
             <span>{post.tags.map((tag) => tag.name).join(" / ")}</span>
           ) : null}

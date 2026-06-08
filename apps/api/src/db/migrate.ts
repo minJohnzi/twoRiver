@@ -29,6 +29,15 @@ export function migrate(databasePath = loadConfig().DATABASE_PATH): void {
 
   try {
     db.exec(schema);
+    const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[];
+    if (!sessionColumns.some((column) => column.name === "csrf_token")) {
+      db.prepare("ALTER TABLE sessions ADD COLUMN csrf_token TEXT").run();
+      db.prepare("DELETE FROM sessions").run();
+    }
+    const postColumns = db.prepare("PRAGMA table_info(posts)").all() as { name: string }[];
+    if (!postColumns.some((column) => column.name === "category_id")) {
+      db.prepare("ALTER TABLE posts ADD COLUMN category_id INTEGER").run();
+    }
   } finally {
     db.close();
   }

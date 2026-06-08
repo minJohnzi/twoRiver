@@ -1,7 +1,7 @@
-import type { Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
+import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { createAdminPost, fetchAdminPost, updateAdminPost } from "../api/admin";
+import { createAdminPost, deleteAdminPost, fetchAdminCategories, fetchAdminPost, updateAdminPost } from "../api/admin";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 
 interface AdminEditorPageProps {
@@ -22,7 +22,13 @@ function cloneTranslations(): TranslationDraft {
   };
 }
 
-function buildInput(slug: string, status: PostStatus, tagText: string, translations: TranslationDraft): UpsertPostInput {
+function buildInput(
+  slug: string,
+  status: PostStatus,
+  categorySlug: string,
+  tagText: string,
+  translations: TranslationDraft
+): UpsertPostInput {
   const nextTranslations = (["zh", "en"] as const)
     .map((translationLocale) => ({
       locale: translationLocale,
@@ -38,11 +44,15 @@ function buildInput(slug: string, status: PostStatus, tagText: string, translati
     slug: slug.trim(),
     status,
     publishedAt: status === "published" ? new Date().toISOString() : null,
+    categorySlug: categorySlug.trim() || null,
     tagSlugs: tagText
       .split(",")
       .map((tag) => tag.trim())
       .filter(Boolean),
-    translations: nextTranslations.length > 0 ? nextTranslations : [{ ...translations.zh, locale: "zh", seoTitle: null, seoDescription: null }]
+    translations:
+      nextTranslations.length > 0
+        ? nextTranslations
+        : [{ ...translations.zh, locale: "zh", seoTitle: null, seoDescription: null }]
   };
 }
 
@@ -51,12 +61,28 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const { id } = useParams();
   const postId = id && id !== "new" ? Number(id) : undefined;
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [slug, setSlug] = useState("");
   const [status, setStatus] = useState<PostStatus>("draft");
+  const [categorySlug, setCategorySlug] = useState("");
   const [tagText, setTagText] = useState("");
   const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
   const [isLoading, setIsLoading] = useState(Boolean(postId));
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchAdminCategories()
+      .then(({ categories: nextCategories }) => {
+        if (isMounted) {
+          setCategories(nextCategories);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!postId) {
@@ -87,6 +113,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
         setSlug(post.slug);
         setStatus(post.status);
+        setCategorySlug(post.category?.slug ?? "");
         setTagText(post.tags.map((tag) => tag.slug).join(", "));
         setTranslations(nextTranslations);
       } catch (caught) {
@@ -119,13 +146,31 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   async function savePost(nextStatus: PostStatus) {
     setError(null);
-    const input = buildInput(slug, nextStatus, tagText, translations);
+    const input = buildInput(slug, nextStatus, categorySlug, tagText, translations);
 
     try {
       const { post } = postId ? await updateAdminPost(postId, input) : await createAdminPost(input);
       navigate(`/admin/posts/${post.id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save post");
+    }
+  }
+
+  async function handleDelete() {
+    if (!postId) {
+      return;
+    }
+    const confirmed = window.confirm(locale === "zh" ? "确定删除这篇文章？" : "Delete this post?");
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await deleteAdminPost(postId);
+      navigate("/admin/posts");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to delete post");
     }
   }
 
@@ -149,7 +194,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       <form className="editor-shell" onSubmit={handleSubmit}>
         <div className="editor-toolbar">
           <div>
-            <p className="admin-kicker">{locale === "zh" ? "Writing room" : "Writing room"}</p>
+            <p className="admin-kicker">Writing room</p>
             <Link className="back-link" to="/admin/posts">
               {locale === "zh" ? "返回文章管理" : "Back to posts"}
             </Link>
@@ -162,6 +207,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
             <button className="primary-button" type="button" onClick={() => void savePost("published")}>
               {locale === "zh" ? "发布" : "Publish"}
             </button>
+            {postId ? (
+              <button className="secondary-button" type="button" onClick={() => void handleDelete()}>
+                {locale === "zh" ? "删除" : "Delete"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -181,6 +231,17 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 <select value={status} onChange={(event) => setStatus(event.target.value as PostStatus)}>
                   <option value="draft">{locale === "zh" ? "草稿" : "Draft"}</option>
                   <option value="published">{locale === "zh" ? "发布" : "Published"}</option>
+                </select>
+              </label>
+              <label>
+                <span>{locale === "zh" ? "分类" : "Category"}</span>
+                <select value={categorySlug} onChange={(event) => setCategorySlug(event.target.value)}>
+                  <option value="">{locale === "zh" ? "不设置分类" : "No category"}</option>
+                  {categories.map((category) => (
+                    <option key={category.slug} value={category.slug}>
+                      {category.name}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label>

@@ -12,6 +12,26 @@ describe("MarkdownPreview", () => {
       "const value = 1;"
     );
   });
+
+  it("removes executable markdown HTML and unsafe links", () => {
+    const { container } = render(
+      <MarkdownPreview
+        markdown={
+          [
+            "<script>window.__xss = true</script>",
+            '<img src="x" onerror="window.__xss = true">',
+            "[unsafe](javascript:alert(1))",
+            "`<script>alert(1)</script>`"
+          ].join("\n\n")
+        }
+      />
+    );
+
+    expect(container.querySelector("script")).not.toBeInTheDocument();
+    expect(container.querySelector("img")?.getAttribute("onerror")).toBeNull();
+    expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
+    expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
+  });
 });
 
 describe("admin editor behavior", () => {

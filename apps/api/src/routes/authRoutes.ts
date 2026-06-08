@@ -40,6 +40,13 @@ export async function authRoutes(app: FastifyInstance, { config }: AuthRoutesOpt
       secure: config.NODE_ENV === "production",
       expires: new Date(session.expiresAt)
     });
+    reply.setCookie("tworiver_csrf", session.csrfToken, {
+      httpOnly: false,
+      path: "/",
+      sameSite: "lax",
+      secure: config.NODE_ENV === "production",
+      expires: new Date(session.expiresAt)
+    });
 
     return {
       user: {
@@ -49,13 +56,16 @@ export async function authRoutes(app: FastifyInstance, { config }: AuthRoutesOpt
     };
   });
 
-  app.post("/api/auth/logout", async (request, reply) => {
+  app.post("/api/auth/logout", { preHandler: [app.requireAuth, app.requireCsrf] }, async (request, reply) => {
     const sessionId = request.cookies.tworiver_session;
     if (sessionId) {
       deleteSession(app.db, sessionId);
     }
 
     reply.clearCookie("tworiver_session", {
+      path: "/"
+    });
+    reply.clearCookie("tworiver_csrf", {
       path: "/"
     });
 
