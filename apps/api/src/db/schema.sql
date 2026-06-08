@@ -56,6 +56,21 @@ CREATE TABLE IF NOT EXISTS post_tags (
   FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS about_profile (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  display_name TEXT NOT NULL DEFAULT '',
+  headline TEXT NOT NULL DEFAULT '',
+  bio TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT NOT NULL DEFAULT '',
+  github_url TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  social_links_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+INSERT OR IGNORE INTO about_profile (id) VALUES (1);
+
 CREATE INDEX IF NOT EXISTS idx_posts_status_published_at ON posts(status, published_at);
 CREATE INDEX IF NOT EXISTS idx_post_translations_locale ON post_translations(locale);
 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);

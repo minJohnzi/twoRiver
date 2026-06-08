@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .codex/
+.superpowers/
 .env
 .env.local
 *.sqlite

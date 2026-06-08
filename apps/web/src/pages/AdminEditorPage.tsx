@@ -146,60 +146,15 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   return (
     <section className="admin-editor">
-      <Link className="back-link" to="/admin/posts">
-        {locale === "zh" ? "返回文章管理" : "Back to posts"}
-      </Link>
-      <form className="editor-grid" onSubmit={handleSubmit}>
-        <div className="editor-fields">
-          <h1>{postId ? (locale === "zh" ? "编辑文章" : "Edit post") : locale === "zh" ? "新建文章" : "New post"}</h1>
-          <label>
-            <span>Slug</span>
-            <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="my-technical-note" />
-          </label>
-          <label>
-            <span>{locale === "zh" ? "状态" : "Status"}</span>
-            <select value={status} onChange={(event) => setStatus(event.target.value as PostStatus)}>
-              <option value="draft">{locale === "zh" ? "草稿" : "Draft"}</option>
-              <option value="published">{locale === "zh" ? "发布" : "Published"}</option>
-            </select>
-          </label>
-          <label>
-            <span>{locale === "zh" ? "标签（逗号分隔）" : "Tags (comma-separated)"}</span>
-            <input value={tagText} onChange={(event) => setTagText(event.target.value)} placeholder="typescript, sqlite" />
-          </label>
-
-          <div className="language-tabs" role="tablist" aria-label="Editor language">
-            {(["zh", "en"] as const).map((translationLocale) => (
-              <button
-                type="button"
-                key={translationLocale}
-                className={activeLocale === translationLocale ? "is-active" : undefined}
-                onClick={() => setActiveLocale(translationLocale)}
-              >
-                {translationLocale === "zh" ? "中文" : "EN"}
-              </button>
-            ))}
+      <form className="editor-shell" onSubmit={handleSubmit}>
+        <div className="editor-toolbar">
+          <div>
+            <p className="admin-kicker">{locale === "zh" ? "Writing room" : "Writing room"}</p>
+            <Link className="back-link" to="/admin/posts">
+              {locale === "zh" ? "返回文章管理" : "Back to posts"}
+            </Link>
+            <h1>{postId ? (locale === "zh" ? "编辑文章" : "Edit post") : locale === "zh" ? "新建文章" : "New post"}</h1>
           </div>
-
-          <label>
-            <span>{locale === "zh" ? "标题" : "Title"}</span>
-            <input value={currentTranslation.title} onChange={(event) => updateTranslation("title", event.target.value)} />
-          </label>
-          <label>
-            <span>{locale === "zh" ? "摘要" : "Summary"}</span>
-            <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
-          </label>
-          <label>
-            <span>Markdown body</span>
-            <textarea
-              aria-label="Markdown body"
-              value={currentTranslation.contentMarkdown}
-              onChange={(event) => updateTranslation("contentMarkdown", event.target.value)}
-              rows={14}
-            />
-          </label>
-
-          {error ? <p className="error-text">{error}</p> : null}
           <div className="editor-actions">
             <button className="secondary-button" type="button" onClick={() => void savePost("draft")}>
               {locale === "zh" ? "保存草稿" : "Save draft"}
@@ -210,10 +165,77 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           </div>
         </div>
 
-        <aside className="preview-pane">
-          <p className="muted">{locale === "zh" ? "实时预览" : "Live preview"}</p>
-          <MarkdownPreview markdown={currentTranslation.contentMarkdown} />
-        </aside>
+        <div className="editor-grid">
+          <div className="editor-fields">
+            <div className="editor-card">
+              <div className="editor-card__heading">
+                <h2>{locale === "zh" ? "文章设置" : "Post settings"}</h2>
+                <span className={`status-pill status-pill--${status}`}>{status}</span>
+              </div>
+              <label>
+                <span>Slug</span>
+                <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="my-technical-note" />
+              </label>
+              <label>
+                <span>{locale === "zh" ? "状态" : "Status"}</span>
+                <select value={status} onChange={(event) => setStatus(event.target.value as PostStatus)}>
+                  <option value="draft">{locale === "zh" ? "草稿" : "Draft"}</option>
+                  <option value="published">{locale === "zh" ? "发布" : "Published"}</option>
+                </select>
+              </label>
+              <label>
+                <span>{locale === "zh" ? "标签（逗号分隔）" : "Tags (comma-separated)"}</span>
+                <input value={tagText} onChange={(event) => setTagText(event.target.value)} placeholder="typescript, sqlite" />
+              </label>
+            </div>
+
+            <div className="editor-card editor-card--writing">
+              <div className="editor-card__heading">
+                <h2>{locale === "zh" ? "正文内容" : "Writing"}</h2>
+                <div className="language-tabs" role="tablist" aria-label="Editor language">
+                  {(["zh", "en"] as const).map((translationLocale) => (
+                    <button
+                      type="button"
+                      key={translationLocale}
+                      className={activeLocale === translationLocale ? "is-active" : undefined}
+                      onClick={() => setActiveLocale(translationLocale)}
+                    >
+                      {translationLocale === "zh" ? "中文" : "EN"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label>
+                <span>{locale === "zh" ? "标题" : "Title"}</span>
+                <input value={currentTranslation.title} onChange={(event) => updateTranslation("title", event.target.value)} />
+              </label>
+              <label>
+                <span>{locale === "zh" ? "摘要" : "Summary"}</span>
+                <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
+              </label>
+              <label>
+                <span>Markdown body</span>
+                <textarea
+                  aria-label="Markdown body"
+                  value={currentTranslation.contentMarkdown}
+                  onChange={(event) => updateTranslation("contentMarkdown", event.target.value)}
+                  rows={18}
+                />
+              </label>
+
+              {error ? <p className="error-text">{error}</p> : null}
+            </div>
+          </div>
+
+          <aside className="preview-pane">
+            <div className="preview-pane__heading">
+              <span>{locale === "zh" ? "预览" : "Preview"}</span>
+              <strong>{activeLocale === "zh" ? "中文" : "EN"}</strong>
+            </div>
+            <MarkdownPreview markdown={currentTranslation.contentMarkdown} />
+          </aside>
+        </div>
       </form>
     </section>
   );

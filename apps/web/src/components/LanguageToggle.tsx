@@ -6,24 +6,16 @@ interface LanguageToggleProps {
 }
 
 export function LanguageToggle({ locale, onLocaleChange }: LanguageToggleProps) {
+  const nextLocale = locale === "zh" ? "en" : "zh";
+
   return (
-    <div className="language-toggle" aria-label="Language">
-      <button
-        type="button"
-        className={locale === "zh" ? "is-active" : undefined}
-        aria-pressed={locale === "zh"}
-        onClick={() => onLocaleChange("zh")}
-      >
-        中文
-      </button>
-      <button
-        type="button"
-        className={locale === "en" ? "is-active" : undefined}
-        aria-pressed={locale === "en"}
-        onClick={() => onLocaleChange("en")}
-      >
-        EN
-      </button>
-    </div>
+    <button
+      type="button"
+      className="language-toggle"
+      aria-label={`Switch to ${nextLocale === "zh" ? "Chinese" : "English"}`}
+      onClick={() => onLocaleChange(nextLocale)}
+    >
+      {locale === "zh" ? "en" : "中"}
+    </button>
   );
 }

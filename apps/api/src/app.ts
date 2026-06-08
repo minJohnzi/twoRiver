@@ -3,6 +3,7 @@ import Fastify from "fastify";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
 import authPlugin from "./plugins/auth.js";
+import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
@@ -34,6 +35,8 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(authPlugin);
   app.register(authRoutes, { config });
   app.register(publicRoutes);
+  app.register(publicAboutRoutes);
+  app.register(adminAboutRoutes);
   app.register(adminPostRoutes);
   app.register(adminTagRoutes);
 

@@ -41,6 +41,37 @@ export const PublicPostSchema = PublicPostListItemSchema.extend({
 });
 export type PublicPost = z.infer<typeof PublicPostSchema>;
 
+export const AboutProfileSchema = z.object({
+  displayName: z.string().default(""),
+  headline: z.string().default(""),
+  bio: z.string().default(""),
+  avatarUrl: z.string().default(""),
+  githubUrl: z.string().default(""),
+  email: z.string().default(""),
+  socialLinks: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        url: z.string().min(1)
+      })
+    )
+    .default([]),
+  updatedAt: DateTimeStringSchema.nullable().default(null)
+});
+export type AboutProfile = z.infer<typeof AboutProfileSchema>;
+
+export const UpsertAboutProfileInputSchema = AboutProfileSchema.omit({ updatedAt: true }).extend({
+  socialLinks: z
+    .array(
+      z.object({
+        label: z.string().min(1),
+        url: z.string().min(1)
+      })
+    )
+    .default([])
+});
+export type UpsertAboutProfileInput = z.infer<typeof UpsertAboutProfileInputSchema>;
+
 export const UpsertPostInputSchema = z.object({
   slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   status: PostStatusSchema,

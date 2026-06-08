@@ -25,7 +25,9 @@ function formatDate(value: string | null, locale: Locale): string {
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-Hans" : "en", {
-    dateStyle: "medium"
+    month: "short",
+    day: "2-digit",
+    year: "numeric"
   }).format(new Date(value));
 }
 
@@ -80,48 +82,51 @@ export function HomePage({ locale }: HomePageProps) {
   }, [posts, selectedTag]);
 
   return (
-    <section className="page-section">
-      <div className="page-heading">
-        <h1>{locale === "zh" ? "技术笔记" : "Engineering Notes"}</h1>
+    <section className="home-page">
+      <header className="home-intro">
+        <h1>{locale === "zh" ? "把工程里的判断写清楚。" : "Writing engineering judgment clearly."}</h1>
         <p>
           {locale === "zh"
-            ? "软件工程、系统设计与开发实践的个人记录。"
-            : "Personal notes on software engineering, systems, and development practice."}
+            ? "TwoRiver 是一份中英双语技术记录，关注软件工程、系统设计和真实开发实践里的取舍。"
+            : "TwoRiver is a bilingual technical journal about software engineering, system design, and the tradeoffs behind real development work."}
         </p>
-      </div>
+      </header>
 
-      <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
+      <section className="section-block" aria-labelledby="latest-notes">
+        <div className="section-title-row">
+          <h2 id="latest-notes">{locale === "zh" ? "最新文章" : "Latest notes"}</h2>
+          <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
+        </div>
 
-      {isLoading ? <p className="muted">Loading...</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
-      {!isLoading && !error && visiblePosts.length === 0 ? (
-        <p className="muted">{locale === "zh" ? "暂无文章。" : "No posts yet."}</p>
-      ) : null}
+        {isLoading ? <p className="muted">Loading...</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+        {!isLoading && !error && visiblePosts.length === 0 ? (
+          <p className="muted">{locale === "zh" ? "暂无文章。" : "No posts yet."}</p>
+        ) : null}
 
-      <div className="post-list">
-        {visiblePosts.map((post) => {
-          const translation = findTranslation(post.translations, locale);
-          const title = translation?.title ?? post.slug;
-          const summary = translation?.summary ?? "";
+        {!isLoading && !error && visiblePosts.length > 0 ? (
+          <div className="post-list">
+            {visiblePosts.map((post) => {
+              const translation = findTranslation(post.translations, locale);
+              const title = translation?.title ?? post.slug;
+              const summary = translation?.summary ?? "";
 
-          return (
-            <article className="post-list__item" key={post.id}>
-              <div className="post-meta">
-                <time dateTime={post.publishedAt ?? undefined}>
-                  {formatDate(post.publishedAt, locale)}
-                </time>
-                {post.tags.length > 0 ? (
-                  <span>{post.tags.map((tag) => tag.name).join(" / ")}</span>
-                ) : null}
-              </div>
-              <h2>
-                <Link to={`/posts/${post.slug}`}>{title}</Link>
-              </h2>
-              {summary ? <p>{summary}</p> : null}
-            </article>
-          );
-        })}
-      </div>
+              return (
+                <article className="post-list__item" key={post.id}>
+                  <div className="post-row-meta">
+                    <time dateTime={post.publishedAt ?? undefined}>{formatDate(post.publishedAt, locale)}</time>
+                    {post.tags.length > 0 ? <span>{post.tags.map((tag) => tag.name).join(", ")}</span> : null}
+                  </div>
+                  <h3>
+                    <Link to={`/posts/${post.slug}`}>{title}</Link>
+                  </h3>
+                  {summary ? <p>{summary}</p> : null}
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+      </section>
     </section>
   );
 }

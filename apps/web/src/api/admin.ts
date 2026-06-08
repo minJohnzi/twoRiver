@@ -1,4 +1,4 @@
-import type { PublicPost, UpsertPostInput } from "@tworiver/shared";
+import type { AboutProfile, PublicPost, UpsertAboutProfileInput, UpsertPostInput } from "@tworiver/shared";
 import { apiRequest } from "./client";
 
 export interface CurrentUser {
@@ -40,6 +40,17 @@ export function createAdminPost(input: UpsertPostInput) {
 
 export function updateAdminPost(id: number, input: UpsertPostInput) {
   return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
+export function fetchAdminAboutProfile() {
+  return apiRequest<{ about: AboutProfile }>("/api/admin/about");
+}
+
+export function updateAdminAboutProfile(input: UpsertAboutProfileInput) {
+  return apiRequest<{ about: AboutProfile }>("/api/admin/about", {
     method: "PUT",
     body: JSON.stringify(input)
   });
