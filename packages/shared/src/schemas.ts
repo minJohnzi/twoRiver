@@ -33,7 +33,7 @@ export const PostTranslationSchema = z.object({
 export type PostTranslation = z.infer<typeof PostTranslationSchema>;
 
 export const TranslationChunkSchema = z.object({
-  index: z.number().int(),
+  index: z.number().int().nonnegative(),
   inputChars: z.number().int().nonnegative(),
   outputChars: z.number().int().nonnegative(),
   warnings: z.array(z.string())
