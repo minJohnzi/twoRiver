@@ -47,13 +47,13 @@ export const TranslationDraftSourceSchema = PostTranslationSchema.pick({
   contentMarkdown: true,
   seoTitle: true,
   seoDescription: true
-});
+}).strict();
 export type TranslationDraftSource = z.infer<typeof TranslationDraftSourceSchema>;
 
 export const TranslationDraftInputSchema = z.object({
   source: TranslationDraftSourceSchema,
   targetLocale: LocaleSchema
-});
+}).strict();
 export type TranslationDraftInput = z.infer<typeof TranslationDraftInputSchema>;
 
 export const TranslationDraftResponseSchema = z.object({
