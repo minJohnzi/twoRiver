@@ -92,6 +92,7 @@ By default:
 | `CORS_ALLOWED_ORIGINS` | Comma-separated trusted browser origins in production | `https://example.me,https://www.example.me` |
 | `DEEPSEEK_API_KEY` | Optional API key for AI helper services | empty |
 | `DEEPSEEK_BASE_URL` | DeepSeek-compatible API base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | DeepSeek-compatible model for AI helper services | `deepseek-chat` |
 | `VITE_API_BASE_URL` | Frontend API base URL | `http://localhost:4000` |
 
 Production startup rejects the default `SESSION_SECRET` and `ADMIN_PASSWORD`, so replace both before deploying. Production also requires `CORS_ALLOWED_ORIGINS`.

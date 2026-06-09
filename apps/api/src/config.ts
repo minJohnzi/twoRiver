@@ -24,7 +24,8 @@ const ConfigSchema = z.object({
   ADMIN_PASSWORD: z.string().min(12).default(DEFAULT_ADMIN_PASSWORD),
   CORS_ALLOWED_ORIGINS: z.preprocess(parseOriginList, z.array(z.string().url()).default([])),
   DEEPSEEK_API_KEY: z.string().optional(),
-  DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com")
+  DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
+  DEEPSEEK_MODEL: z.string().default("deepseek-chat")
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

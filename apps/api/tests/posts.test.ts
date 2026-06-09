@@ -20,7 +20,8 @@ function makeConfig(databasePath: string): AppConfig {
     ADMIN_USERNAME: "admin",
     ADMIN_PASSWORD: "secret1234567",
     CORS_ALLOWED_ORIGINS: [],
-    DEEPSEEK_BASE_URL: "https://api.deepseek.com"
+    DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+    DEEPSEEK_MODEL: "deepseek-chat"
   };
 }
 

@@ -7,6 +7,7 @@ import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
+import { adminTranslationRoutes } from "./routes/adminTranslationRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { publicRoutes } from "./routes/publicRoutes.js";
 
@@ -77,6 +78,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(adminCategoryRoutes);
   app.register(adminPostRoutes);
   app.register(adminTagRoutes);
+  app.register(adminTranslationRoutes, { config });
 
   app.get("/api/health", async () => ({
     ok: true,
