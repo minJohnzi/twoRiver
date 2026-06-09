@@ -20,6 +20,8 @@ TwoRiver Blog is a minimal bilingual technical blog. It pairs a React/Vite front
 - **Shared package:** TypeScript schemas and inferred types
 - **Testing:** Vitest, Testing Library, jsdom
 
+The API consumes `ztrans` from the committed package artifact at `vendor/ztrans-0.1.0.tgz` so installs do not require a sibling `ztrans` checkout.
+
 ## Repository Layout
 
 ```text
@@ -34,6 +36,7 @@ TwoRiver Blog is a minimal bilingual technical blog. It pairs a React/Vite front
 |   |-- superpowers/  # Historical design and implementation planning records
 |   `-- checklist.md  # Manual QA checklist
 |-- scripts/          # Server deployment and update scripts
+|-- vendor/           # Committed third-party package artifacts
 |-- .env.example
 |-- package.json
 `-- pnpm-workspace.yaml

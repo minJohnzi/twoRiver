@@ -39,8 +39,8 @@ importers:
         specifier: ^3.25.56
         version: 3.25.76
       ztrans:
-        specifier: file:E:/ztrans
-        version: file:../ztrans
+        specifier: file:../../vendor/ztrans-0.1.0.tgz
+        version: file:vendor/ztrans-0.1.0.tgz
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1908,8 +1908,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  ztrans@file:../ztrans:
-    resolution: {directory: ../ztrans, type: directory}
+  ztrans@file:vendor/ztrans-0.1.0.tgz:
+    resolution: {integrity: sha512-NYSnay7MQhj1fZ9NC0CNNyIJ2gPGHBKoAGlXmfApp+q7kTtbwYDixKRJrcZZVqkap2/xWHsR8vGrtykCA40utA==, tarball: file:vendor/ztrans-0.1.0.tgz}
+    version: 0.1.0
     engines: {node: '>=20'}
     hasBin: true
 
@@ -3742,7 +3743,7 @@ snapshots:
 
   zod@3.25.76: {}
 
-  ztrans@file:../ztrans:
+  ztrans@file:vendor/ztrans-0.1.0.tgz:
     dependencies:
       commander: 12.1.0
       gray-matter: 4.0.3
