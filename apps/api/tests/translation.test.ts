@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
+import type { TranslationDraftResponse } from "@tworiver/shared";
 import type { AppConfig } from "../src/config.js";
 import { buildApp } from "../src/app.js";
 import { openDatabase } from "../src/db/connection.js";
@@ -145,7 +146,7 @@ describe("admin translation routes", () => {
           warnings: ["Chunk warning"]
         }
       ]
-    };
+    } satisfies TranslationDraftResponse;
     mockedTranslatePostDraft.mockResolvedValueOnce(translationResponse);
 
     try {
@@ -185,7 +186,7 @@ describe("admin translation routes", () => {
       },
       warnings: [],
       chunks: []
-    };
+    } satisfies TranslationDraftResponse;
     mockedTranslatePostDraft.mockResolvedValueOnce(translationResponse);
 
     try {
