@@ -40,13 +40,13 @@ export const TranslationChunkSchema = z.object({
 });
 export type TranslationChunk = z.infer<typeof TranslationChunkSchema>;
 
-export const TranslationDraftSourceSchema = PostTranslationSchema.pick({
-  locale: true,
-  title: true,
-  summary: true,
-  contentMarkdown: true,
-  seoTitle: true,
-  seoDescription: true
+export const TranslationDraftSourceSchema = z.object({
+  locale: LocaleSchema,
+  title: z.string(),
+  summary: z.string().default(""),
+  contentMarkdown: z.string().default(""),
+  seoTitle: z.string().nullable().default(null),
+  seoDescription: z.string().nullable().default(null)
 }).strict();
 export type TranslationDraftSource = z.infer<typeof TranslationDraftSourceSchema>;
 

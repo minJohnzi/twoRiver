@@ -368,6 +368,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                         key={translationLocale}
                         className={activeLocale === translationLocale ? "is-active" : undefined}
                         onClick={() => setActiveLocale(translationLocale)}
+                        disabled={isTranslating}
                       >
                         {translationLocale === "zh" ? "中文" : "EN"}
                       </button>
@@ -381,11 +382,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
               <label>
                 <span>{locale === "zh" ? "标题" : "Title"}</span>
-                <input value={currentTranslation.title} onChange={(event) => updateTranslation("title", event.target.value)} />
+                <input value={currentTranslation.title} onChange={(event) => updateTranslation("title", event.target.value)} disabled={isTranslating} />
               </label>
               <label>
                 <span>{locale === "zh" ? "摘要" : "Summary"}</span>
-                <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
+                <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} disabled={isTranslating} />
               </label>
               <label>
                 <span>Markdown body</span>
@@ -394,6 +395,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                   value={currentTranslation.contentMarkdown}
                   onChange={(event) => updateTranslation("contentMarkdown", event.target.value)}
                   rows={18}
+                  disabled={isTranslating}
                 />
               </label>
 
