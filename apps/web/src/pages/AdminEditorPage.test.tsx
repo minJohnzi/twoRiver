@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PublicPost, TranslationDraftResponse } from "@tworiver/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -178,6 +178,7 @@ function renderEditor(route = "/admin/posts/new") {
   return render(
     <MemoryRouter initialEntries={[route]}>
       <Routes>
+        <Route path="/admin/posts/new" element={<AdminEditorPage locale="en" />} />
         <Route path="/admin/posts/:id" element={<AdminEditorPage locale="en" />} />
       </Routes>
     </MemoryRouter>
@@ -205,20 +206,11 @@ function fillCurrentTranslation({
 }
 
 function switchToChineseTab() {
-  fireEvent.click(getLanguageTab(0));
+  fireEvent.click(screen.getByRole("button", { name: "Edit Chinese translation" }));
 }
 
 function switchToEnglishTab() {
-  fireEvent.click(getLanguageTab(1));
-}
-
-function getLanguageTab(index: number) {
-  const tabs = within(screen.getByRole("tablist", { name: "Editor language" })).getAllByRole("button");
-  const tab = tabs[index];
-  if (!tab) {
-    throw new Error(`Expected editor language tab at index ${index}`);
-  }
-  return tab;
+  fireEvent.click(screen.getByRole("button", { name: "Edit English translation" }));
 }
 
 function makePost(): PublicPost {

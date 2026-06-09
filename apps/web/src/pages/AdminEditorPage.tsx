@@ -366,6 +366,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                       <button
                         type="button"
                         key={translationLocale}
+                        aria-label={translationLocale === "zh" ? "Edit Chinese translation" : "Edit English translation"}
                         className={activeLocale === translationLocale ? "is-active" : undefined}
                         onClick={() => setActiveLocale(translationLocale)}
                         disabled={isTranslating}
