@@ -30,7 +30,10 @@ TwoRiver Blog is a minimal bilingual technical blog. It pairs a React/Vite front
 |-- packages/
 |   `-- shared/       # Shared Zod schemas and TypeScript types
 |-- docs/
-|   `-- deployment/   # Deployment notes
+|   |-- deployment/   # Current Ubuntu deployment and operations notes
+|   |-- superpowers/  # Historical design and implementation planning records
+|   `-- checklist.md  # Manual QA checklist
+|-- scripts/          # Server deployment and update scripts
 |-- .env.example
 |-- package.json
 `-- pnpm-workspace.yaml
@@ -86,11 +89,14 @@ By default:
 | `SESSION_SECRET` | Session signing secret; use a long random value | `replace-with-at-least-32-random-characters` |
 | `ADMIN_USERNAME` | Seeded admin username | `admin` |
 | `ADMIN_PASSWORD` | Seeded admin password; must be at least 12 characters | `change-me-before-deploy` |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated trusted browser origins in production | `https://example.me,https://www.example.me` |
 | `DEEPSEEK_API_KEY` | Optional API key for AI helper services | empty |
 | `DEEPSEEK_BASE_URL` | DeepSeek-compatible API base URL | `https://api.deepseek.com` |
 | `VITE_API_BASE_URL` | Frontend API base URL | `http://localhost:4000` |
 
-Production startup rejects the default `SESSION_SECRET` and `ADMIN_PASSWORD`, so replace both before deploying.
+Production startup rejects the default `SESSION_SECRET` and `ADMIN_PASSWORD`, so replace both before deploying. Production also requires `CORS_ALLOWED_ORIGINS`.
+
+For same-origin production deployment through Nginx, do not set `VITE_API_BASE_URL`; the frontend should call `/api/...` on the same domain.
 
 ## Common Commands
 
@@ -99,6 +105,7 @@ pnpm dev              # Run API and web app in development mode
 pnpm build            # Build all workspace packages
 pnpm typecheck        # Type-check all workspace packages
 pnpm test             # Run all tests
+pnpm test:e2e         # Run Playwright end-to-end tests
 pnpm lint             # Run the lint/type-check script in each package
 pnpm api:migrate      # Apply SQLite schema migrations
 pnpm api:seed-admin   # Create or update the configured admin user
@@ -113,13 +120,45 @@ pnpm --filter @tworiver/api build
 pnpm --filter @tworiver/web build
 ```
 
+## Deployment Scripts
+
+Interactive first-time setup on an Ubuntu server:
+
+```bash
+bash scripts/deploy-setup.sh
+```
+
+Reusable update flow after new commits are available:
+
+```bash
+bash scripts/deploy-update.sh
+```
+
+The update script skips deployment when `git pull` does not change the current commit. Use `--force` to rebuild and restart anyway:
+
+```bash
+bash scripts/deploy-update.sh --force
+```
+
+Before running the scripts on a server, syntax-check them:
+
+```bash
+bash -n scripts/deploy-setup.sh
+bash -n scripts/deploy-update.sh
+```
+
 ## API Overview
 
 Public endpoints:
 
+- `GET /api/health`
 - `GET /api/posts`
 - `GET /api/posts/:slug`
 - `GET /api/tags`
+- `GET /api/tags/:slug`
+- `GET /api/categories`
+- `GET /api/categories/:slug`
+- `GET /api/about`
 
 Authentication:
 
@@ -134,10 +173,16 @@ Admin endpoints require a valid session cookie:
 - `GET /api/admin/posts/:id`
 - `PUT /api/admin/posts/:id`
 - `DELETE /api/admin/posts/:id`
+- `GET /api/admin/categories`
+- `POST /api/admin/categories`
+- `PUT /api/admin/categories/:id`
+- `DELETE /api/admin/categories/:id`
 - `GET /api/admin/tags`
 - `POST /api/admin/tags`
 - `PUT /api/admin/tags/:id`
 - `DELETE /api/admin/tags/:id`
+- `GET /api/admin/about`
+- `PUT /api/admin/about`
 
 ## Content Model
 
@@ -157,4 +202,7 @@ See [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md) for an Ubuntu deploym
 
 - Nginx for the static frontend
 - systemd for the Fastify API
-- SQLite stored under `/var/lib/tworiver-blog`
+- an interactive first-time setup script and a reusable update script
+- GoDaddy DNS pointing at an Aliyun ECS public IP
+- free HTTPS certificates from Let's Encrypt
+- SQLite stored under the deployed project directory
