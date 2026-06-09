@@ -1,18 +1,25 @@
-import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
+import type { Category, Locale, PostStatus, PostTranslation, TranslationDraftInput, UpsertPostInput } from "@tworiver/shared";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { createAdminPost, deleteAdminPost, fetchAdminCategories, fetchAdminPost, updateAdminPost } from "../api/admin";
+import {
+  createAdminPost,
+  deleteAdminPost,
+  fetchAdminCategories,
+  fetchAdminPost,
+  translateAdminPostDraft,
+  updateAdminPost
+} from "../api/admin";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 
 interface AdminEditorPageProps {
   locale: Locale;
 }
 
-type TranslationDraft = Record<Locale, Pick<PostTranslation, "title" | "summary" | "contentMarkdown">>;
+type TranslationDraft = Record<Locale, Pick<PostTranslation, "title" | "summary" | "contentMarkdown" | "seoTitle" | "seoDescription">>;
 
 const EMPTY_TRANSLATIONS: TranslationDraft = {
-  zh: { title: "", summary: "", contentMarkdown: "" },
-  en: { title: "", summary: "", contentMarkdown: "" }
+  zh: { title: "", summary: "", contentMarkdown: "", seoTitle: null, seoDescription: null },
+  en: { title: "", summary: "", contentMarkdown: "", seoTitle: null, seoDescription: null }
 };
 
 function cloneTranslations(): TranslationDraft {
@@ -35,8 +42,8 @@ function buildInput(
       title: translations[translationLocale].title.trim(),
       summary: translations[translationLocale].summary.trim(),
       contentMarkdown: translations[translationLocale].contentMarkdown,
-      seoTitle: null,
-      seoDescription: null
+      seoTitle: normalizeOptionalText(translations[translationLocale].seoTitle),
+      seoDescription: normalizeOptionalText(translations[translationLocale].seoDescription)
     }))
     .filter((translation) => translation.title || translation.contentMarkdown);
 
@@ -52,7 +59,50 @@ function buildInput(
     translations:
       nextTranslations.length > 0
         ? nextTranslations
-        : [{ ...translations.zh, locale: "zh", seoTitle: null, seoDescription: null }]
+        : [
+            {
+              ...translations.zh,
+              locale: "zh",
+              title: translations.zh.title.trim(),
+              summary: translations.zh.summary.trim(),
+              seoTitle: normalizeOptionalText(translations.zh.seoTitle),
+              seoDescription: normalizeOptionalText(translations.zh.seoDescription)
+            }
+          ]
+  };
+}
+
+function normalizeOptionalText(value: string | null): string | null {
+  const nextValue = value?.trim() ?? "";
+  return nextValue || null;
+}
+
+function getTargetLocale(sourceLocale: Locale): Locale {
+  return sourceLocale === "zh" ? "en" : "zh";
+}
+
+function hasTranslationContent(translation: TranslationDraft[Locale]): boolean {
+  return Boolean(
+    translation.title.trim() ||
+      translation.summary.trim() ||
+      translation.contentMarkdown.trim() ||
+      translation.seoTitle?.trim() ||
+      translation.seoDescription?.trim()
+  );
+}
+
+function buildTranslationInput(sourceLocale: Locale, translations: TranslationDraft): TranslationDraftInput {
+  const source = translations[sourceLocale];
+  return {
+    source: {
+      locale: sourceLocale,
+      title: source.title,
+      summary: source.summary,
+      contentMarkdown: source.contentMarkdown,
+      seoTitle: normalizeOptionalText(source.seoTitle),
+      seoDescription: normalizeOptionalText(source.seoDescription)
+    },
+    targetLocale: getTargetLocale(sourceLocale)
   };
 }
 
@@ -68,6 +118,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [tagText, setTagText] = useState("");
   const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
   const [isLoading, setIsLoading] = useState(Boolean(postId));
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationWarnings, setTranslationWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -107,7 +159,9 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           nextTranslations[translation.locale] = {
             title: translation.title,
             summary: translation.summary,
-            contentMarkdown: translation.contentMarkdown
+            contentMarkdown: translation.contentMarkdown,
+            seoTitle: translation.seoTitle,
+            seoDescription: translation.seoDescription
           };
         }
 
@@ -156,6 +210,51 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     }
   }
 
+  async function handleTranslateDraft() {
+    const targetLocale = getTargetLocale(activeLocale);
+    const sourceTranslation = translations[activeLocale];
+
+    if (!sourceTranslation.title.trim() && !sourceTranslation.contentMarkdown.trim()) {
+      setError(locale === "zh" ? "Source title or body is required" : "Source title or body is required");
+      return;
+    }
+
+    if (hasTranslationContent(translations[targetLocale])) {
+      const confirmed = window.confirm(
+        locale === "zh"
+          ? "Target translation already has content. Replace it?"
+          : "Target translation already has content. Replace it?"
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setIsTranslating(true);
+    setError(null);
+    setTranslationWarnings([]);
+
+    try {
+      const result = await translateAdminPostDraft(buildTranslationInput(activeLocale, translations));
+      setTranslations((current) => ({
+        ...current,
+        [targetLocale]: {
+          title: result.translation.title,
+          summary: result.translation.summary,
+          contentMarkdown: result.translation.contentMarkdown,
+          seoTitle: result.translation.seoTitle,
+          seoDescription: result.translation.seoDescription
+        }
+      }));
+      setActiveLocale(targetLocale);
+      setTranslationWarnings(result.warnings);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to translate draft");
+    } finally {
+      setIsTranslating(false);
+    }
+  }
+
   async function handleDelete() {
     if (!postId) {
       return;
@@ -180,6 +279,14 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   const currentTranslation = translations[activeLocale];
+  const translationButtonLabel = isTranslating
+    ? locale === "zh"
+      ? "翻译中..."
+      : "Translating..."
+    : activeLocale === "zh"
+      ? "Translate to EN"
+      : "Translate to Chinese";
+  const warningSummary = `Translation completed with ${translationWarnings.length} structure warning(s).`;
 
   if (isLoading) {
     return (
@@ -253,17 +360,22 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
             <div className="editor-card editor-card--writing">
               <div className="editor-card__heading">
                 <h2>{locale === "zh" ? "正文内容" : "Writing"}</h2>
-                <div className="language-tabs" role="tablist" aria-label="Editor language">
-                  {(["zh", "en"] as const).map((translationLocale) => (
-                    <button
-                      type="button"
-                      key={translationLocale}
-                      className={activeLocale === translationLocale ? "is-active" : undefined}
-                      onClick={() => setActiveLocale(translationLocale)}
-                    >
-                      {translationLocale === "zh" ? "中文" : "EN"}
-                    </button>
-                  ))}
+                <div className="editor-language-actions">
+                  <div className="language-tabs" role="tablist" aria-label="Editor language">
+                    {(["zh", "en"] as const).map((translationLocale) => (
+                      <button
+                        type="button"
+                        key={translationLocale}
+                        className={activeLocale === translationLocale ? "is-active" : undefined}
+                        onClick={() => setActiveLocale(translationLocale)}
+                      >
+                        {translationLocale === "zh" ? "中文" : "EN"}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="secondary-button translate-draft-button" type="button" onClick={() => void handleTranslateDraft()} disabled={isTranslating}>
+                    {translationButtonLabel}
+                  </button>
                 </div>
               </div>
 
@@ -286,6 +398,16 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
               </label>
 
               {error ? <p className="error-text">{error}</p> : null}
+              {translationWarnings.length > 0 ? (
+                <div className="warning-text" role="status">
+                  <p>{warningSummary}</p>
+                  <ul>
+                    {translationWarnings.map((warning, index) => (
+                      <li key={`${index}-${warning}`}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </div>
 

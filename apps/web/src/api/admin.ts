@@ -1,4 +1,13 @@
-import type { AboutProfile, Category, PublicPost, Tag, UpsertAboutProfileInput, UpsertPostInput } from "@tworiver/shared";
+import type {
+  AboutProfile,
+  Category,
+  PublicPost,
+  Tag,
+  TranslationDraftInput,
+  TranslationDraftResponse,
+  UpsertAboutProfileInput,
+  UpsertPostInput
+} from "@tworiver/shared";
 import { apiRequest } from "./client";
 
 export interface CurrentUser {
@@ -47,6 +56,13 @@ export function createAdminPost(input: UpsertPostInput) {
 export function updateAdminPost(id: number, input: UpsertPostInput) {
   return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}`, {
     method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
+export function translateAdminPostDraft(input: TranslationDraftInput) {
+  return apiRequest<TranslationDraftResponse>("/api/admin/posts/translate-draft", {
+    method: "POST",
     body: JSON.stringify(input)
   });
 }

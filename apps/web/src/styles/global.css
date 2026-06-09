@@ -1067,6 +1067,14 @@ a:hover {
   gap: 14px;
 }
 
+.editor-language-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .language-tabs button {
   border: 0;
   background: transparent;
@@ -1079,6 +1087,28 @@ a:hover {
   color: var(--color-heading);
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+.translate-draft-button {
+  min-height: 34px;
+  padding-block: 7px;
+}
+
+.warning-text {
+  border: 1px solid var(--color-border);
+  background: var(--color-admin-panel-strong);
+  color: var(--color-muted);
+  padding: 12px;
+}
+
+.warning-text p {
+  margin: 0 0 8px;
+  color: var(--color-heading);
+}
+
+.warning-text ul {
+  margin: 0;
+  padding-left: 20px;
 }
 
 .preview-pane {
