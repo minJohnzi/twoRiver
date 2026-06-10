@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs/promises";
 import type { AppConfig } from "../../config.js";
 
 const PUBLIC_UPLOAD_PREFIX = "/uploads";
@@ -17,4 +18,8 @@ export function getPostImagePublicUrl(postUid: string, filename: string): string
 
 export function isValidPostUid(value: string): boolean {
   return /^p_[0-9a-f-]{36}$/.test(value);
+}
+
+export async function removePostImageDirectory(config: AppConfig, postUid: string): Promise<void> {
+  await fs.rm(getPostImageDirectory(config, postUid), { recursive: true, force: true });
 }

@@ -1,17 +1,23 @@
 import { UpsertPostInputSchema } from "@tworiver/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import type { AppConfig } from "../config.js";
 import {
   createPost,
-  deletePost,
+  deletePostWithUid,
   getAdminPostById,
   InvalidPostInputError,
   listAdminPosts,
   PostSlugConflictError,
   updatePost
 } from "../repositories/postsRepository.js";
+import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
 
 interface IdParams {
   id: string;
+}
+
+interface AdminPostRouteOptions {
+  config: AppConfig;
 }
 
 function parseId(id: string): number | undefined {
@@ -32,7 +38,7 @@ function sendPostError(error: unknown, reply: FastifyReply): boolean {
   return false;
 }
 
-export async function adminPostRoutes(app: FastifyInstance) {
+export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPostRouteOptions) {
   app.addHook("preHandler", app.requireAuth);
   app.addHook("preHandler", app.requireCsrf);
 
@@ -110,9 +116,18 @@ export async function adminPostRoutes(app: FastifyInstance) {
       return;
     }
 
-    if (!deletePost(app.db, id)) {
+    const result = deletePostWithUid(app.db, id);
+    if (!result.deleted) {
       reply.code(404).send({ message: "Post not found" });
       return;
+    }
+
+    if (result.uid) {
+      try {
+        await removePostImageDirectory(config, result.uid);
+      } catch (error) {
+        request.log.error({ error, postUid: result.uid }, "Failed to clean post image uploads");
+      }
     }
 
     return { ok: true };

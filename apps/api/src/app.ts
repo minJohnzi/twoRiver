@@ -9,6 +9,7 @@ import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
+import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { publicRoutes } from "./routes/publicRoutes.js";
 import { MAX_IMAGE_BYTES } from "./services/uploads/imageUploadService.js";
@@ -90,7 +91,8 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(publicAboutRoutes);
   app.register(adminAboutRoutes);
   app.register(adminCategoryRoutes);
-  app.register(adminPostRoutes);
+  app.register(adminPostRoutes, { config });
+  app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
 
   app.get("/api/health", async () => ({

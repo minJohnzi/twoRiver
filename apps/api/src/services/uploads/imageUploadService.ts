@@ -33,6 +33,8 @@ export interface StoredImage {
   markdown: string;
 }
 
+export type PostImageUploadFile = Pick<MultipartFile, "filename" | "mimetype" | "toBuffer">;
+
 function startsWithSignature(buffer: Buffer, signature: Buffer): boolean {
   return buffer.length >= signature.length && buffer.subarray(0, signature.length).equals(signature);
 }
@@ -54,7 +56,7 @@ function hasValidImageSignature(buffer: Buffer, mimetype: string): boolean {
   return false;
 }
 
-export async function storePostImage(config: AppConfig, postUid: string, file: MultipartFile): Promise<StoredImage> {
+export async function storePostImage(config: AppConfig, postUid: string, file: PostImageUploadFile): Promise<StoredImage> {
   if (!isValidPostUid(postUid)) {
     throw new ImageUploadValidationError("Invalid post UID");
   }

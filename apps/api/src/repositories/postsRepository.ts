@@ -270,8 +270,17 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
 }
 
 export function deletePost(db: BlogDatabase, id: number): boolean {
+  return deletePostWithUid(db, id).deleted;
+}
+
+export function deletePostWithUid(db: BlogDatabase, id: number): { deleted: boolean; uid?: string } {
+  const row = getPostRowById(db, id);
+  if (!row) {
+    return { deleted: false };
+  }
+
   const result = db.prepare("DELETE FROM posts WHERE id = ?").run(id);
-  return result.changes > 0;
+  return { deleted: result.changes > 0, uid: row.uid };
 }
 
 export function getPostIdByUid(db: BlogDatabase, uid: string): number | undefined {
