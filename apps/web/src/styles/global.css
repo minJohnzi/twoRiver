@@ -1017,6 +1017,34 @@ a:hover {
   justify-self: end;
 }
 
+.markdown-control-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.markdown-drop-target {
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.markdown-drop-target.is-dragging {
+  border-color: var(--color-admin-accent);
+  box-shadow: 0 0 0 3px var(--color-admin-accent-soft);
+}
+
 .social-link-fields {
   display: grid;
   grid-template-columns: minmax(120px, 0.55fr) minmax(0, 1fr) auto;
@@ -1029,7 +1057,8 @@ a:hover {
 }
 
 .form-stack label,
-.editor-fields label {
+.editor-fields label,
+.editor-field {
   display: grid;
   gap: 6px;
   color: var(--color-muted);
@@ -1075,6 +1104,12 @@ a:hover {
   text-decoration: underline;
   text-decoration-color: var(--color-link-line);
   text-underline-offset: 0.18em;
+}
+
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .primary-button {

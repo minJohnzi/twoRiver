@@ -131,6 +131,7 @@ describe("public taxonomy routes", () => {
   it("renders taxonomy detail pages and filters posts from the API response", async () => {
     const post = {
       id: 1,
+      uid: "p_22222222-2222-4222-8222-222222222222",
       slug: "published-flow",
       status: "published" as const,
       publishedAt: "2026-02-03T04:05:06.000Z",

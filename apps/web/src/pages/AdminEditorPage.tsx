@@ -1,7 +1,14 @@
 import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
-import { type FormEvent, useEffect, useState } from "react";
+import { type ClipboardEvent, type DragEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { createAdminPost, deleteAdminPost, fetchAdminCategories, fetchAdminPost, updateAdminPost } from "../api/admin";
+import {
+  createAdminPost,
+  deleteAdminPost,
+  fetchAdminCategories,
+  fetchAdminPost,
+  updateAdminPost,
+  uploadAdminPostImage
+} from "../api/admin";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 
 interface AdminEditorPageProps {
@@ -14,6 +21,9 @@ const EMPTY_TRANSLATIONS: TranslationDraft = {
   zh: { title: "", summary: "", contentMarkdown: "" },
   en: { title: "", summary: "", contentMarkdown: "" }
 };
+
+const DEFAULT_IMAGE_ALT = "图片";
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 function cloneTranslations(): TranslationDraft {
   return {
@@ -60,7 +70,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const navigate = useNavigate();
   const { id } = useParams();
   const postId = id && id !== "new" ? Number(id) : undefined;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const markdownTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isUploadingImageRef = useRef(false);
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
+  const [postUid, setPostUid] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [slug, setSlug] = useState("");
   const [status, setStatus] = useState<PostStatus>("draft");
@@ -68,6 +82,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [tagText, setTagText] = useState("");
   const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
   const [isLoading, setIsLoading] = useState(Boolean(postId));
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,6 +102,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   useEffect(() => {
     if (!postId) {
+      setPostUid(null);
       return;
     }
 
@@ -112,6 +129,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         }
 
         setSlug(post.slug);
+        setPostUid(post.uid);
         setStatus(post.status);
         setCategorySlug(post.category?.slug ?? "");
         setTagText(post.tags.map((tag) => tag.slug).join(", "));
@@ -144,12 +162,114 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     }));
   }
 
+  function getSelectedMarkdownDetails() {
+    const textarea = markdownTextareaRef.current;
+    const current = translations[activeLocale].contentMarkdown;
+    const start = textarea?.selectionStart ?? current.length;
+    const end = textarea?.selectionEnd ?? current.length;
+    const selectedText = current.slice(start, end).trim();
+    return {
+      start,
+      end,
+      selectedText
+    };
+  }
+
+  function replaceDefaultImageAlt(markdown: string, alt: string) {
+    const safeAlt = alt.replace(/[\]\r\n]/g, " ").trim() || DEFAULT_IMAGE_ALT;
+    return markdown.replace(`![${DEFAULT_IMAGE_ALT}]`, `![${safeAlt}]`);
+  }
+
+  function insertMarkdownAtSelection(markdown: string, start: number, end: number) {
+    setTranslations((current) => {
+      const currentMarkdown = current[activeLocale].contentMarkdown;
+      const boundedStart = Math.max(0, Math.min(start, currentMarkdown.length));
+      const boundedEnd = Math.max(boundedStart, Math.min(end, currentMarkdown.length));
+      const nextMarkdown = `${currentMarkdown.slice(0, boundedStart)}${markdown}${currentMarkdown.slice(boundedEnd)}`;
+
+      return {
+        ...current,
+        [activeLocale]: {
+          ...current[activeLocale],
+          contentMarkdown: nextMarkdown
+        }
+      };
+    });
+
+    window.requestAnimationFrame(() => {
+      const textarea = markdownTextareaRef.current;
+      if (!textarea) {
+        return;
+      }
+      const cursor = start + markdown.length;
+      textarea.focus();
+      textarea.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  async function uploadImageFile(file: File) {
+    if (isUploadingImageRef.current) {
+      return;
+    }
+
+    if (!postUid) {
+      setError(locale === "zh" ? "请先保存草稿再上传图片。" : "Save the draft before uploading images.");
+      return;
+    }
+
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+      setError(locale === "zh" ? "仅支持 jpg、png、webp 和 gif 图片。" : "Only jpg, png, webp, and gif images are supported.");
+      return;
+    }
+
+    const { start, end, selectedText } = getSelectedMarkdownDetails();
+    isUploadingImageRef.current = true;
+    setIsUploadingImage(true);
+    setError(null);
+
+    try {
+      const result = await uploadAdminPostImage({ postUid, file });
+      insertMarkdownAtSelection(replaceDefaultImageAlt(result.markdown, selectedText || DEFAULT_IMAGE_ALT), start, end);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to upload image");
+    } finally {
+      isUploadingImageRef.current = false;
+      setIsUploadingImage(false);
+    }
+  }
+
+  function getFirstTransferredFile(files: FileList | File[] | undefined) {
+    return Array.from(files ?? [])[0];
+  }
+
+  function handleMarkdownDrop(event: DragEvent<HTMLTextAreaElement>) {
+    const file = getFirstTransferredFile(event.dataTransfer.files);
+    if (!file) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDraggingImage(false);
+    void uploadImageFile(file);
+  }
+
+  function handleMarkdownPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const file = getFirstTransferredFile(event.clipboardData.files);
+    if (!file) {
+      return;
+    }
+
+    event.preventDefault();
+    void uploadImageFile(file);
+  }
+
   async function savePost(nextStatus: PostStatus) {
     setError(null);
     const input = buildInput(slug, nextStatus, categorySlug, tagText, translations);
 
     try {
       const { post } = postId ? await updateAdminPost(postId, input) : await createAdminPost(input);
+      setPostUid(post.uid);
       navigate(`/admin/posts/${post.id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save post");
@@ -275,15 +395,54 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 <span>{locale === "zh" ? "摘要" : "Summary"}</span>
                 <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
               </label>
-              <label>
-                <span>Markdown body</span>
+              <div className="editor-field">
+                <div className="markdown-control-row">
+                  <span>Markdown body</span>
+                  <input
+                    ref={fileInputRef}
+                    aria-label="Upload image file"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="file-input-hidden"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      if (file && !isUploadingImageRef.current) {
+                        void uploadImageFile(file);
+                      }
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={isUploadingImage}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {isUploadingImage ? (locale === "zh" ? "上传中..." : "Uploading...") : locale === "zh" ? "上传图片" : "Upload image"}
+                  </button>
+                </div>
                 <textarea
+                  ref={markdownTextareaRef}
                   aria-label="Markdown body"
+                  className={isDraggingImage ? "markdown-drop-target is-dragging" : "markdown-drop-target"}
                   value={currentTranslation.contentMarkdown}
                   onChange={(event) => updateTranslation("contentMarkdown", event.target.value)}
+                  onDragEnter={(event) => {
+                    if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) {
+                      setIsDraggingImage(true);
+                    }
+                  }}
+                  onDragOver={(event) => {
+                    if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onDragLeave={() => setIsDraggingImage(false)}
+                  onDrop={handleMarkdownDrop}
+                  onPaste={handleMarkdownPaste}
                   rows={18}
                 />
-              </label>
+              </div>
 
               {error ? <p className="error-text">{error}</p> : null}
             </div>

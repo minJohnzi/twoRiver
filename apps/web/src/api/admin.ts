@@ -51,6 +51,22 @@ export function updateAdminPost(id: number, input: UpsertPostInput) {
   });
 }
 
+export interface UploadedImage {
+  url: string;
+  markdown: string;
+}
+
+export function uploadAdminPostImage(input: { postUid: string; file: File }) {
+  const body = new FormData();
+  body.set("postUid", input.postUid);
+  body.set("file", input.file);
+
+  return apiRequest<UploadedImage>("/api/admin/uploads/images", {
+    method: "POST",
+    body
+  });
+}
+
 export function fetchAdminAboutProfile() {
   return apiRequest<{ about: AboutProfile }>("/api/admin/about");
 }
