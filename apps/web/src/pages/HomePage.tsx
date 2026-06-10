@@ -78,11 +78,11 @@ export function HomePage({ locale }: HomePageProps) {
   return (
     <section className="home-page">
       <header className="home-intro">
-        <h1>{locale === "zh" ? "写清工程判断" : "Clear engineering judgment."}</h1>
+        <h1>{locale === "zh" ? "王维《竹里馆》" : "Bamboo Lodge, Wang Wei"}</h1>
         <p>
           {locale === "zh"
-            ? "TwoRiver 记录软件工程、系统设计与真实开发中的取舍，中英双语。"
-            : "TwoRiver is a bilingual record of software engineering, system design, and real development tradeoffs."}
+            ? "独坐幽篁里，弹琴复长啸。深林人不知，明月来相照。"
+            : "Sitting alone among bamboo, playing qin and singing long; no one knows me in the deep grove, but the bright moon comes to shine."}
         </p>
       </header>
 
