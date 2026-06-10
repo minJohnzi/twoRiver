@@ -74,21 +74,17 @@ export function HomePage({ locale }: HomePageProps) {
 
     return posts.filter((post) => post.tags.some((tag) => tag.slug === selectedTag));
   }, [posts, selectedTag]);
+  const postCountLabel =
+    locale === "zh" ? `${visiblePosts.length} 篇记录` : `${visiblePosts.length} ${visiblePosts.length === 1 ? "note" : "notes"}`;
 
   return (
     <section className="home-page">
-      <header className="home-intro">
-        <h1>{locale === "zh" ? "王维《竹里馆》" : "Bamboo Lodge, Wang Wei"}</h1>
-        <p>
-          {locale === "zh"
-            ? "独坐幽篁里，弹琴复长啸。深林人不知，明月来相照。"
-            : "Sitting alone among bamboo, playing qin and singing long; no one knows me in the deep grove, but the bright moon comes to shine."}
-        </p>
-      </header>
-
-      <section className="section-block" aria-labelledby="latest-notes">
+      <section className="section-block home-feed" aria-labelledby="latest-notes">
         <div className="section-title-row">
-          <h2 id="latest-notes">{locale === "zh" ? "最新文章" : "Latest notes"}</h2>
+          <div>
+            <h1 id="latest-notes">Writing</h1>
+            {!isLoading && !error ? <p>{postCountLabel}</p> : null}
+          </div>
           <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
         </div>
 

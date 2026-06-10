@@ -177,6 +177,27 @@ a:hover {
   padding-bottom: 10px;
 }
 
+.home-feed .section-title-row {
+  align-items: flex-end;
+  padding-bottom: 18px;
+}
+
+.home-feed .section-title-row h1 {
+  margin: 0;
+  color: var(--color-heading);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: 0;
+}
+
+.home-feed .section-title-row p {
+  margin: 7px 0 0;
+  color: var(--color-subtle);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .section-title-row h2,
 .section-heading h2 {
   margin: 0;
@@ -1150,6 +1171,14 @@ a:hover {
   }
 
   .site-nav {
+    justify-content: flex-start;
+  }
+
+  .home-feed .section-title-row h1 {
+    font-size: 30px;
+  }
+
+  .home-feed .tag-filter {
     justify-content: flex-start;
   }
 
