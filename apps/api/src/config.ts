@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 
 const DEFAULT_DATABASE_PATH = "./data/blog.sqlite";
@@ -29,8 +31,70 @@ const ConfigSchema = z.object({
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const config = ConfigSchema.parse(env);
+interface LoadConfigOptions {
+  cwd?: string;
+}
+
+function findEnvFile(startDirectory: string): string | undefined {
+  let currentDirectory = path.resolve(startDirectory);
+
+  while (true) {
+    const envPath = path.join(currentDirectory, ".env");
+    if (fs.existsSync(envPath)) {
+      return envPath;
+    }
+
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+    currentDirectory = parentDirectory;
+  }
+}
+
+function parseEnvFile(content: string): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  for (const rawLine of content.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    let value = line.slice(separatorIndex + 1).trim();
+    if (!key) {
+      continue;
+    }
+
+    const quote = value[0];
+    if ((quote === '"' || quote === "'") && value.endsWith(quote)) {
+      value = value.slice(1, -1);
+    }
+
+    values[key] = value;
+  }
+
+  return values;
+}
+
+function loadEnvFile(cwd: string): Record<string, string> {
+  const envPath = findEnvFile(cwd);
+  if (!envPath) {
+    return {};
+  }
+
+  return parseEnvFile(fs.readFileSync(envPath, "utf8"));
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadConfigOptions = {}): AppConfig {
+  const fileEnv = loadEnvFile(options.cwd ?? process.cwd());
+  const config = ConfigSchema.parse({ ...fileEnv, ...env });
 
   if (config.NODE_ENV === "production") {
     if (!env.SESSION_SECRET || config.SESSION_SECRET === DEFAULT_SESSION_SECRET) {

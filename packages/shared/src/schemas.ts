@@ -5,7 +5,7 @@ export const DateTimeStringSchema = z.string().datetime();
 export const LocaleSchema = z.enum(["zh", "en"]);
 export type Locale = z.infer<typeof LocaleSchema>;
 
-export const PostStatusSchema = z.enum(["draft", "published"]);
+export const PostStatusSchema = z.enum(["draft", "published", "hidden"]);
 export type PostStatus = z.infer<typeof PostStatusSchema>;
 
 export const TagSchema = z.object({

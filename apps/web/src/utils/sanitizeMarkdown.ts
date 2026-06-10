@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { resolveApiAssetUrl } from "../api/client";
 
 const ALLOWED_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 
@@ -12,6 +13,10 @@ export function sanitizeMarkdownHtml(html: string): string {
 
   for (const image of Array.from(template.content.querySelectorAll("img"))) {
     image.setAttribute("loading", "lazy");
+    const src = image.getAttribute("src");
+    if (src) {
+      image.setAttribute("src", resolveApiAssetUrl(src));
+    }
   }
 
   return template.innerHTML;

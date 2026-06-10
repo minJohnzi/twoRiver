@@ -1,4 +1,13 @@
-import type { AboutProfile, Category, PublicPost, Tag, UpsertAboutProfileInput, UpsertPostInput } from "@tworiver/shared";
+import type {
+  AboutProfile,
+  Category,
+  Locale,
+  PostTranslation,
+  PublicPost,
+  Tag,
+  UpsertAboutProfileInput,
+  UpsertPostInput
+} from "@tworiver/shared";
 import { apiRequest } from "./client";
 
 export interface CurrentUser {
@@ -64,6 +73,23 @@ export function uploadAdminPostImage(input: { postUid: string; file: File }) {
   return apiRequest<UploadedImage>("/api/admin/uploads/images", {
     method: "POST",
     body
+  });
+}
+
+export interface TranslatePostDraftInput {
+  source: Pick<PostTranslation, "locale" | "title" | "summary" | "contentMarkdown">;
+  targetLocale: Locale;
+}
+
+export interface TranslatePostDraftResponse {
+  translation: PostTranslation;
+  warnings: string[];
+}
+
+export function translateAdminPostDraft(input: TranslatePostDraftInput) {
+  return apiRequest<TranslatePostDraftResponse>("/api/admin/posts/translate-draft", {
+    method: "POST",
+    body: JSON.stringify(input)
   });
 }
 

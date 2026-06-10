@@ -7,6 +7,7 @@ import { fetchCurrentUser, fetchAdminPosts, logout } from "./api/admin";
 import {
   fetchCategories,
   fetchCategoryDetail,
+  fetchPost,
   fetchPosts,
   fetchTagDetail,
   fetchTags
@@ -46,6 +47,7 @@ const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser);
 const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
 const mockedLogout = vi.mocked(logout);
 const mockedFetchPosts = vi.mocked(fetchPosts);
+const mockedFetchPost = vi.mocked(fetchPost);
 const mockedFetchTags = vi.mocked(fetchTags);
 const mockedFetchTagDetail = vi.mocked(fetchTagDetail);
 const mockedFetchCategories = vi.mocked(fetchCategories);
@@ -192,5 +194,44 @@ describe("public taxonomy routes", () => {
 
     expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
+  });
+
+  it("scrolls article pages back to the top", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(window, "scrollTo", { value: scrollTo, configurable: true });
+    mockedFetchPost.mockResolvedValue({
+      post: {
+        id: 1,
+        uid: "p_22222222-2222-4222-8222-222222222222",
+        slug: "published-flow",
+        status: "published",
+        publishedAt: "2026-02-03T04:05:06.000Z",
+        createdAt: "2026-02-03T04:05:06.000Z",
+        updatedAt: "2026-02-03T04:05:06.000Z",
+        category: null,
+        tags: [],
+        translations: [
+          {
+            locale: "en",
+            title: "Published flow",
+            summary: "Visible",
+            contentMarkdown: "# Section\n\nBody",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/posts/published-flow"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "Published flow" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "回到开头" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 });

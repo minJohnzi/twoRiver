@@ -2,6 +2,7 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import fs from "node:fs";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
 import authPlugin from "./plugins/auth.js";
@@ -29,6 +30,7 @@ export interface BuildAppOptions {
 export function buildApp({ config, db }: BuildAppOptions) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
   app.decorate("db", db);
+  fs.mkdirSync(getUploadsRoot(config), { recursive: true });
 
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;

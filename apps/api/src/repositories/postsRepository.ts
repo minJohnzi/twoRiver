@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   UpsertPostInputSchema,
   type Category,
+  type PostStatus,
   type PostTranslation,
   type Tag,
   type UpsertPostInput
@@ -15,7 +16,7 @@ export interface PostRecord {
   id: number;
   uid: string;
   slug: string;
-  status: "draft" | "published";
+  status: PostStatus;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -28,7 +29,7 @@ interface PostRow {
   id: number;
   uid: string;
   slug: string;
-  status: "draft" | "published";
+  status: PostStatus;
   category_id: number | null;
   published_at: string | null;
   created_at: string;

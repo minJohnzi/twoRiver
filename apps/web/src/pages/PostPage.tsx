@@ -112,6 +112,10 @@ export function PostPage({ locale }: PostPageProps) {
 
   const publishedDate = formatDate(post.publishedAt, locale);
 
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   return (
     <article className="article-shell">
       <Link className="back-link" to="/">
@@ -129,6 +133,10 @@ export function PostPage({ locale }: PostPageProps) {
         {translation.summary ? <p>{translation.summary}</p> : null}
       </header>
       <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+      <button className="back-to-top" type="button" onClick={scrollToTop}>
+        <span aria-hidden="true">↑</span>
+        {locale === "zh" ? "回到开头" : "Back to top"}
+      </button>
     </article>
   );
 }

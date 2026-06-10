@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uid TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL CHECK (status IN ('draft', 'published')),
+  status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'hidden')),
   category_id INTEGER,
   published_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

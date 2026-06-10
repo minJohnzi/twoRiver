@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../src/config.js";
 import { buildApp } from "../src/app.js";
@@ -24,6 +24,13 @@ function makeConfig(databasePath: string): AppConfig {
   };
 }
 
+function makeConfigWithAi(databasePath: string): AppConfig {
+  return {
+    ...makeConfig(databasePath),
+    DEEPSEEK_API_KEY: "test-api-key"
+  };
+}
+
 function createDatabasePath(): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "tworiver-posts-"));
   tempDirectories.push(directory);
@@ -37,6 +44,15 @@ async function createTestApp(): Promise<FastifyInstance> {
   await seedAdmin(db, "admin", "secret1234567");
 
   return buildApp({ config: makeConfig(databasePath), db });
+}
+
+async function createTestAppWithConfig(configFactory: (databasePath: string) => AppConfig): Promise<FastifyInstance> {
+  const databasePath = createDatabasePath();
+  migrate(databasePath);
+  const db = openDatabase(databasePath);
+  await seedAdmin(db, "admin", "secret1234567");
+
+  return buildApp({ config: configFactory(databasePath), db });
 }
 
 async function login(app: FastifyInstance): Promise<string> {
@@ -98,6 +114,135 @@ afterEach(() => {
 });
 
 describe("post routes", () => {
+  test("returns 503 when translation is requested without AI configuration", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/translate-draft",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          source: {
+            locale: "en",
+            title: "Source",
+            summary: "",
+            contentMarkdown: "Body"
+          },
+          targetLocale: "zh"
+        }
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({ message: "AI translation is not configured" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("drafts a post translation without writing a post", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "中文标题",
+                  summary: "中文摘要",
+                  contentMarkdown: "中文正文"
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const app = await createTestAppWithConfig(makeConfigWithAi);
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/translate-draft",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          source: {
+            locale: "en",
+            title: "English title",
+            summary: "English summary",
+            contentMarkdown: "English body"
+          },
+          targetLocale: "zh"
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        translation: {
+          locale: "zh",
+          title: "中文标题",
+          summary: "中文摘要",
+          contentMarkdown: "中文正文",
+          seoTitle: null,
+          seoDescription: null
+        },
+        warnings: []
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.deepseek.com/chat/completions",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-api-key",
+            "Content-Type": "application/json"
+          })
+        })
+      );
+    } finally {
+      fetchMock.mockRestore();
+      await app.close();
+    }
+  });
+
+  test("returns an actionable message when the AI provider reports quota exhaustion", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "Insufficient balance" } }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const app = await createTestAppWithConfig(makeConfigWithAi);
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/translate-draft",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          source: {
+            locale: "en",
+            title: "English title",
+            summary: "",
+            contentMarkdown: "English body"
+          },
+          targetLocale: "zh"
+        }
+      });
+
+      expect(response.statusCode).toBe(429);
+      expect(response.json()).toEqual({
+        message: "AI quota or rate limit reached. Check the API key balance or try again later."
+      });
+    } finally {
+      fetchMock.mockRestore();
+      await app.close();
+    }
+  });
+
   test("rejects authenticated admin post mutations without a CSRF header", async () => {
     const app = await createTestApp();
 
@@ -450,6 +595,77 @@ describe("post routes", () => {
       await app.close();
     }
   });
+
+  test("hides a published post from public routes without clearing its publish history", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const publishedAt = "2026-02-03T04:05:06.000Z";
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "temporarily-hidden",
+          status: "published",
+          publishedAt,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Visible body" }]
+        }
+      });
+
+      expect(createResponse.statusCode).toBe(201);
+      const postId = createResponse.json().post.id;
+
+      const hideResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${postId}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "temporarily-hidden",
+          status: "hidden",
+          publishedAt,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Hidden body" }]
+        }
+      });
+
+      expect(hideResponse.statusCode).toBe(200);
+      expect(hideResponse.json().post.status).toBe("hidden");
+      expect(hideResponse.json().post.publishedAt).toBe(publishedAt);
+
+      const publicDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-hidden" });
+      expect(publicDetailResponse.statusCode).toBe(404);
+
+      const publicListResponse = await app.inject({ method: "GET", url: "/api/posts" });
+      expect(publicListResponse.statusCode).toBe(200);
+      expect(publicListResponse.json()).toEqual({ posts: [] });
+
+      const republishResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${postId}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "temporarily-hidden",
+          status: "published",
+          publishedAt,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Visible again" }]
+        }
+      });
+
+      expect(republishResponse.statusCode).toBe(200);
+      expect(republishResponse.json().post.status).toBe("published");
+      expect(republishResponse.json().post.publishedAt).toBe(publishedAt);
+
+      const visibleDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-hidden" });
+      expect(visibleDetailResponse.statusCode).toBe(200);
+      expect(visibleDetailResponse.json().post.publishedAt).toBe(publishedAt);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe("post migrations", () => {
@@ -544,6 +760,47 @@ describe("post migrations", () => {
       ).toThrow();
       expect(() => migratedDb.prepare("UPDATE posts SET uid = NULL WHERE slug = ?").run("legacy-one")).toThrow();
       expect(() => migratedDb.prepare("UPDATE posts SET uid = '' WHERE slug = ?").run("legacy-one")).toThrow();
+    } finally {
+      migratedDb.close();
+    }
+  });
+
+  test("allows hidden status after migrating existing post status constraints", () => {
+    const databasePath = createDatabasePath();
+    const db = openDatabase(databasePath);
+    db.exec(`
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('draft', 'published')),
+        category_id INTEGER,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
+      VALUES ('legacy-published', 'published', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+    `);
+    db.close();
+
+    migrate(databasePath);
+
+    const migratedDb = openDatabase(databasePath);
+    try {
+      expect(() =>
+        migratedDb
+          .prepare(
+            `UPDATE posts
+             SET status = 'hidden'
+             WHERE slug = ?`
+          )
+          .run("legacy-published")
+      ).not.toThrow();
+      expect(migratedDb.prepare("SELECT status, published_at FROM posts WHERE slug = ?").get("legacy-published")).toEqual({
+        status: "hidden",
+        published_at: "2026-01-02T00:00:00.000Z"
+      });
     } finally {
       migratedDb.close();
     }

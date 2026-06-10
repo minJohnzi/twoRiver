@@ -1,5 +1,6 @@
 import { UpsertPostInputSchema } from "@tworiver/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import {
   createPost,
@@ -10,6 +11,8 @@ import {
   PostSlugConflictError,
   updatePost
 } from "../repositories/postsRepository.js";
+import { AiClientNotConfiguredError, AiProviderError } from "../services/ai/aiClient.js";
+import { draftPostTranslation } from "../services/ai/translationDraftService.js";
 import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
 
 interface IdParams {
@@ -19,6 +22,16 @@ interface IdParams {
 interface AdminPostRouteOptions {
   config: AppConfig;
 }
+
+const TranslateDraftInputSchema = z.object({
+  source: z.object({
+    locale: z.enum(["zh", "en"]),
+    title: z.string().default(""),
+    summary: z.string().default(""),
+    contentMarkdown: z.string().default("")
+  }),
+  targetLocale: z.enum(["zh", "en"])
+});
 
 function parseId(id: string): number | undefined {
   const parsed = Number(id);
@@ -38,6 +51,13 @@ function sendPostError(error: unknown, reply: FastifyReply): boolean {
   return false;
 }
 
+function isQuotaOrRateLimitError(error: AiProviderError): boolean {
+  return (
+    [402, 429].includes(error.status) ||
+    /quota|rate limit|too many requests|insufficient balance|billing|credit/i.test(error.providerMessage)
+  );
+}
+
 export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPostRouteOptions) {
   app.addHook("preHandler", app.requireAuth);
   app.addHook("preHandler", app.requireCsrf);
@@ -45,6 +65,56 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
   app.get("/api/admin/posts", async () => ({
     posts: listAdminPosts(app.db)
   }));
+
+  app.post("/api/admin/posts/translate-draft", async (request, reply) => {
+    const parsed = TranslateDraftInputSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400).send({ message: "Invalid translation input" });
+      return;
+    }
+
+    const { source, targetLocale } = parsed.data;
+    if (source.locale === targetLocale) {
+      reply.code(400).send({ message: "Source and target languages must be different" });
+      return;
+    }
+
+    if (!source.title.trim() && !source.contentMarkdown.trim()) {
+      reply.code(400).send({ message: "Add a title or body before translating" });
+      return;
+    }
+
+    try {
+      const aiConfig = {
+        ...(config.DEEPSEEK_API_KEY ? { apiKey: config.DEEPSEEK_API_KEY } : {}),
+        baseUrl: config.DEEPSEEK_BASE_URL
+      };
+      return await draftPostTranslation(aiConfig, source, targetLocale);
+    } catch (error) {
+      if (error instanceof AiClientNotConfiguredError) {
+        reply.code(503).send({ message: "AI translation is not configured" });
+        return;
+      }
+      if (error instanceof AiProviderError) {
+        if (isQuotaOrRateLimitError(error)) {
+          reply.code(429).send({ message: "AI quota or rate limit reached. Check the API key balance or try again later." });
+          return;
+        }
+
+        if ([401, 403].includes(error.status)) {
+          reply.code(503).send({ message: "AI provider rejected the API key. Check DEEPSEEK_API_KEY." });
+          return;
+        }
+
+        request.log.error({ error, status: error.status }, "Failed to draft post translation");
+        reply.code(502).send({ message: "AI translation provider failed. Try again later." });
+        return;
+      }
+
+      request.log.error({ error }, "Failed to draft post translation");
+      reply.code(502).send({ message: "AI translation failed" });
+    }
+  });
 
   app.post("/api/admin/posts", async (request, reply) => {
     const parsed = UpsertPostInputSchema.safeParse(request.body);

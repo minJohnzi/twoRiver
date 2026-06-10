@@ -16,11 +16,39 @@ interface AiCompletionResponse {
   }>;
 }
 
+interface AiErrorResponse {
+  error?: {
+    message?: string;
+  };
+  message?: string;
+}
+
 export class AiClientNotConfiguredError extends Error {
   constructor() {
     super("AI client is not configured");
     this.name = "AiClientNotConfiguredError";
   }
+}
+
+export class AiProviderError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly providerMessage: string
+  ) {
+    super(`AI provider request failed with status ${status}`);
+    this.name = "AiProviderError";
+  }
+}
+
+async function readProviderError(response: Response): Promise<string> {
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (contentType.includes("application/json")) {
+    const data = (await response.json().catch(() => undefined)) as AiErrorResponse | undefined;
+    return data?.error?.message ?? data?.message ?? response.statusText;
+  }
+
+  const text = await response.text().catch(() => "");
+  return text.trim() || response.statusText;
 }
 
 export async function completeWithAi(config: AiClientConfig, messages: AiMessage[]): Promise<string> {
@@ -42,7 +70,7 @@ export async function completeWithAi(config: AiClientConfig, messages: AiMessage
   });
 
   if (!response.ok) {
-    throw new Error(`AI request failed with status ${response.status}`);
+    throw new AiProviderError(response.status, await readProviderError(response));
   }
 
   const data = (await response.json()) as AiCompletionResponse;

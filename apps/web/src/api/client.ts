@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "http://localhost:4000" : "");
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "http://localhost:4000" : "");
 const CSRF_COOKIE_NAME = "tworiver_csrf";
 
 interface ApiErrorResponse {
@@ -25,6 +25,14 @@ function getCookie(name: string): string | undefined {
 function isStateChangingMethod(method: string | undefined): boolean {
   const normalized = method?.toUpperCase() ?? "GET";
   return !["GET", "HEAD", "OPTIONS"].includes(normalized);
+}
+
+export function resolveApiAssetUrl(url: string): string {
+  if (!url.startsWith("/uploads/") || !API_BASE_URL) {
+    return url;
+  }
+
+  return new URL(url, API_BASE_URL).toString();
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

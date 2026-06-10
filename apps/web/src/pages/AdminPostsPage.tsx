@@ -26,6 +26,9 @@ function getStatusLabel(status: PostStatus, locale: Locale) {
   if (status === "published") {
     return locale === "zh" ? "已发布" : "Published";
   }
+  if (status === "hidden") {
+    return locale === "zh" ? "隐藏/下架" : "Hidden";
+  }
 
   return locale === "zh" ? "草稿" : "Draft";
 }
@@ -123,7 +126,8 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
   );
 
   const publishedCount = posts.filter((post) => post.status === "published").length;
-  const bilingualCount = posts.filter((post) => hasLocale(post, "zh") && hasLocale(post, "en")).length;
+  const draftCount = posts.filter((post) => post.status === "draft").length;
+  const hiddenCount = posts.filter((post) => post.status === "hidden").length;
 
   return (
     <section className="admin-workspace">
@@ -133,7 +137,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
           <h1>{locale === "zh" ? "发布控制台" : "Publishing console"}</h1>
           <p>
             {locale === "zh"
-              ? "按状态、分类和标签筛选文章，快速定位需要编辑、发布或检查的内容。"
+              ? "按状态、分类和标签筛选文章，快速定位需要编辑、发布、下架或检查的内容。"
               : "Filter by status, category, and tags to find the posts that need attention."}
           </p>
         </div>
@@ -164,11 +168,11 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
         </div>
         <div>
           <span>{locale === "zh" ? "草稿" : "Drafts"}</span>
-          <strong>{posts.length - publishedCount}</strong>
+          <strong>{draftCount}</strong>
         </div>
         <div>
-          <span>{locale === "zh" ? "双语" : "Bilingual"}</span>
-          <strong>{bilingualCount}</strong>
+          <span>{locale === "zh" ? "隐藏/下架" : "Hidden"}</span>
+          <strong>{hiddenCount}</strong>
         </div>
       </div>
 
@@ -179,6 +183,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
             <option value="all">{locale === "zh" ? "全部状态" : "All statuses"}</option>
             <option value="draft">{locale === "zh" ? "草稿" : "Draft"}</option>
             <option value="published">{locale === "zh" ? "已发布" : "Published"}</option>
+            <option value="hidden">{locale === "zh" ? "隐藏/下架" : "Hidden"}</option>
           </select>
         </label>
         <label>
