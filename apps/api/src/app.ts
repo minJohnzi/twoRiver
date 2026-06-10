@@ -1,4 +1,6 @@
 import cookie from "@fastify/cookie";
+import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
@@ -9,6 +11,8 @@ import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { publicRoutes } from "./routes/publicRoutes.js";
+import { MAX_IMAGE_BYTES } from "./services/uploads/imageUploadService.js";
+import { getUploadsRoot } from "./services/uploads/uploadPaths.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -67,6 +71,17 @@ export function buildApp({ config, db }: BuildAppOptions) {
 
   app.register(cookie, {
     secret: config.SESSION_SECRET
+  });
+  app.register(multipart, {
+    limits: {
+      fileSize: MAX_IMAGE_BYTES,
+      files: 1
+    }
+  });
+  app.register(fastifyStatic, {
+    root: getUploadsRoot(config),
+    prefix: "/uploads/",
+    decorateReply: false
   });
 
   app.register(authPlugin);

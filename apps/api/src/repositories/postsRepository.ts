@@ -274,6 +274,11 @@ export function deletePost(db: BlogDatabase, id: number): boolean {
   return result.changes > 0;
 }
 
+export function getPostIdByUid(db: BlogDatabase, uid: string): number | undefined {
+  const row = db.prepare("SELECT id FROM posts WHERE uid = ?").get(uid) as { id: number } | undefined;
+  return row?.id;
+}
+
 export function listPublicPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
