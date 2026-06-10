@@ -37,8 +37,6 @@ export function Layout({
             <NavLink to="/" end>
               writing
             </NavLink>
-            <NavLink to="/categories">categories</NavLink>
-            <NavLink to="/tags">tags</NavLink>
             <NavLink to="/about">about</NavLink>
             <button
               type="button"

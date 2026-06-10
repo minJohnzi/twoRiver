@@ -82,7 +82,7 @@ export function HomePage({ locale }: HomePageProps) {
       <section className="section-block home-feed" aria-labelledby="latest-notes">
         <div className="section-title-row">
           <div>
-            <h1 id="latest-notes">Writing</h1>
+            <h1 id="latest-notes">Writing Something</h1>
             {!isLoading && !error ? <p>{postCountLabel}</p> : null}
           </div>
           <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
