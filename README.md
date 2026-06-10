@@ -1,120 +1,120 @@
 # TwoRiver Blog
 
-TwoRiver Blog is a minimal bilingual technical blog. It pairs a React/Vite frontend with a Fastify API, SQLite persistence, and a single-admin publishing workflow.
+TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前端、Fastify API、SQLite 持久化和单管理员发布工作流组成。
 
-## Features
+## 功能特性
 
-- Bilingual post content in Chinese and English
-- Public blog pages with post lists, individual post pages, tags, markdown rendering, and syntax highlighting
-- Admin login protected by an HTTP-only session cookie
-- Admin post editor with draft/published status, tag assignment, and markdown preview
-- Admin image uploads for post Markdown, stored under the database data directory
-- Shared Zod schemas for frontend/API type safety
-- SQLite migrations and admin seeding scripts
-- Optional DeepSeek-compatible AI service helpers for summary, tag, and translation drafting
+- 支持中文和英文两套文章内容
+- 公开博客页面包含文章列表、文章详情、标签、Markdown 渲染和代码高亮
+- 管理员登录使用 HTTP-only session cookie 保护
+- 后台文章编辑器支持草稿/发布状态、标签分配和 Markdown 预览
+- 支持在文章 Markdown 中上传图片，图片存储在数据库目录下
+- 前后端共享 Zod schema，保证类型一致
+- 提供 SQLite 迁移和管理员初始化脚本
+- 可选 DeepSeek 兼容 AI 服务，用于摘要、标签和翻译草稿辅助
 
-## Tech Stack
+## 技术栈
 
-- **Package manager:** pnpm workspace
-- **Frontend:** React 19, React Router, Vite, marked, highlight.js
-- **API:** Fastify, better-sqlite3, argon2, Zod
-- **Shared package:** TypeScript schemas and inferred types
-- **Testing:** Vitest, Testing Library, jsdom
+- **包管理：** pnpm workspace
+- **前端：** React 19、React Router、Vite、marked、highlight.js
+- **API：** Fastify、better-sqlite3、argon2、Zod
+- **共享包：** TypeScript schema 和推导类型
+- **测试：** Vitest、Testing Library、jsdom
 
-## Repository Layout
+## 仓库结构
 
 ```text
 .
 |-- apps/
-|   |-- api/          # Fastify API, SQLite schema, repositories, routes, tests
-|   `-- web/          # React/Vite frontend
+|   |-- api/          # Fastify API、SQLite schema、repositories、routes、tests
+|   `-- web/          # React/Vite 前端
 |-- packages/
-|   `-- shared/       # Shared Zod schemas and TypeScript types
+|   `-- shared/       # 共享 Zod schema 和 TypeScript 类型
 |-- docs/
-|   |-- deployment/   # Current Ubuntu deployment and operations notes
-|   |-- superpowers/  # Historical design and implementation planning records
-|   `-- checklist.md  # Manual QA checklist
-|-- scripts/          # Server deployment and update scripts
+|   |-- deployment/   # Ubuntu 部署和运维说明
+|   |-- superpowers/  # 历史设计与实现计划记录
+|   `-- checklist.md  # 手动 QA 清单
+|-- scripts/          # 服务器部署和更新脚本
 |-- .env.example
 |-- package.json
 `-- pnpm-workspace.yaml
 ```
 
-## Requirements
+## 环境要求
 
-- Node.js 22 or newer is recommended
-- pnpm 9.15.4, matching the `packageManager` field in `package.json`
+- 推荐 Node.js 22 或更新版本
+- pnpm 9.15.4，需与 `package.json` 中的 `packageManager` 字段一致
 
-## Getting Started
+## 快速开始
 
-Install dependencies:
+安装依赖：
 
 ```bash
 pnpm install
 ```
 
-Create a local environment file:
+创建本地环境变量文件：
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` before first run. For local development, the defaults are usable except that `SESSION_SECRET` must be at least 32 characters and `ADMIN_PASSWORD` must be at least 12 characters.
+首次运行前需要编辑 `.env`。本地开发时大部分默认值可直接使用，但 `SESSION_SECRET` 至少需要 32 个字符，`ADMIN_PASSWORD` 至少需要 12 个字符。
 
-Run the database migration and seed the first admin user:
+执行数据库迁移并初始化第一个管理员：
 
 ```bash
 pnpm api:migrate
 pnpm api:seed-admin
 ```
 
-Start both the API and frontend:
+同时启动 API 和前端：
 
 ```bash
 pnpm dev
 ```
 
-By default:
+默认地址：
 
-- API: `http://localhost:4000`
-- Web app: Vite will print the local frontend URL, usually `http://localhost:5173`
-- Admin login: `/admin/login`
+- API：`http://localhost:4000`
+- 前端：Vite 会输出本地访问地址，通常是 `http://localhost:5173`
+- 管理员登录：`/admin/login`
 
-## Environment Variables
+## 环境变量
 
-| Name | Purpose | Default/example |
+| 名称 | 用途 | 默认值/示例 |
 | --- | --- | --- |
-| `NODE_ENV` | Runtime mode: `development`, `test`, or `production` | `development` |
-| `PORT` | Fastify API port | `4000` |
-| `DATABASE_PATH` | SQLite database file path | `./apps/api/data/blog.sqlite` |
-| `SESSION_SECRET` | Session signing secret; use a long random value | `replace-with-at-least-32-random-characters` |
-| `ADMIN_USERNAME` | Seeded admin username | `admin` |
-| `ADMIN_PASSWORD` | Seeded admin password; must be at least 12 characters | `change-me-before-deploy` |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated trusted browser origins in production | `https://example.me,https://www.example.me` |
-| `DEEPSEEK_API_KEY` | Optional API key for AI helper services | empty |
-| `DEEPSEEK_BASE_URL` | DeepSeek-compatible API base URL | `https://api.deepseek.com` |
-| `VITE_API_BASE_URL` | Frontend API base URL | `http://localhost:4000` |
+| `NODE_ENV` | 运行模式：`development`、`test` 或 `production` | `development` |
+| `PORT` | Fastify API 端口 | `4000` |
+| `DATABASE_PATH` | SQLite 数据库文件路径 | `./apps/api/data/blog.sqlite` |
+| `SESSION_SECRET` | Session 签名密钥，请使用足够长的随机值 | `replace-with-at-least-32-random-characters` |
+| `ADMIN_USERNAME` | 初始化管理员用户名 | `admin` |
+| `ADMIN_PASSWORD` | 初始化管理员密码，至少 12 个字符 | `change-me-before-deploy` |
+| `CORS_ALLOWED_ORIGINS` | 生产环境可信浏览器来源，逗号分隔 | `https://example.me,https://www.example.me` |
+| `DEEPSEEK_API_KEY` | 可选 AI 辅助服务 API Key | 空 |
+| `DEEPSEEK_BASE_URL` | DeepSeek 兼容 API Base URL | `https://api.deepseek.com` |
+| `VITE_API_BASE_URL` | 前端 API Base URL | `http://localhost:4000` |
 
-Production startup rejects the default `SESSION_SECRET` and `ADMIN_PASSWORD`, so replace both before deploying. Production also requires `CORS_ALLOWED_ORIGINS`.
+生产环境启动时会拒绝默认的 `SESSION_SECRET` 和 `ADMIN_PASSWORD`，部署前必须替换。生产环境也要求配置 `CORS_ALLOWED_ORIGINS`。
 
-For same-origin production deployment through Nginx, do not set `VITE_API_BASE_URL`; the frontend should call `/api/...` on the same domain.
+如果通过 Nginx 做同源生产部署，不要设置 `VITE_API_BASE_URL`；前端应直接请求同域下的 `/api/...`。
 
-Uploaded images are stored under `<database-dir>/uploads/`, where `<database-dir>` is the directory containing `DATABASE_PATH`. Back up both the SQLite database and the `uploads/` directory.
+上传图片存储在 `<database-dir>/uploads/` 下，其中 `<database-dir>` 是 `DATABASE_PATH` 所在目录。备份时需要同时备份 SQLite 数据库和 `uploads/` 目录。
 
-## Common Commands
+## 常用命令
 
 ```bash
-pnpm dev              # Run API and web app in development mode
-pnpm build            # Build all workspace packages
-pnpm typecheck        # Type-check all workspace packages
-pnpm test             # Run all tests
-pnpm test:e2e         # Run Playwright end-to-end tests
-pnpm lint             # Run the lint/type-check script in each package
-pnpm api:migrate      # Apply SQLite schema migrations
-pnpm api:seed-admin   # Create or update the configured admin user
+pnpm dev              # 开发模式同时运行 API 和前端
+pnpm build            # 构建所有 workspace package
+pnpm typecheck        # 类型检查所有 workspace package
+pnpm test             # 运行全部测试
+pnpm test:e2e         # 运行 Playwright 端到端测试
+pnpm lint             # 运行各 package 的 lint/type-check 脚本
+pnpm api:migrate      # 执行 SQLite schema 迁移
+pnpm api:seed-admin   # 创建或更新配置中的管理员用户
 ```
 
-Package-scoped commands are also available:
+也可以运行 package 级命令：
 
 ```bash
 pnpm --filter @tworiver/api test
@@ -123,36 +123,36 @@ pnpm --filter @tworiver/api build
 pnpm --filter @tworiver/web build
 ```
 
-## Deployment Scripts
+## 部署脚本
 
-Interactive first-time setup on an Ubuntu server:
+Ubuntu 服务器首次交互式部署：
 
 ```bash
 bash scripts/deploy-setup.sh
 ```
 
-Reusable update flow after new commits are available:
+有新提交后的复用更新流程：
 
 ```bash
 bash scripts/deploy-update.sh
 ```
 
-The update script skips deployment when `git pull` does not change the current commit. Use `--force` to rebuild and restart anyway:
+如果 `git pull` 没有带来新提交，更新脚本会自动跳过部署。需要强制重新构建和重启时可以使用：
 
 ```bash
 bash scripts/deploy-update.sh --force
 ```
 
-Before running the scripts on a server, syntax-check them:
+在服务器上运行脚本前，可以先做 Bash 语法检查：
 
 ```bash
 bash -n scripts/deploy-setup.sh
 bash -n scripts/deploy-update.sh
 ```
 
-## API Overview
+## API 概览
 
-Public endpoints:
+公开接口：
 
 - `GET /api/health`
 - `GET /api/posts`
@@ -163,13 +163,13 @@ Public endpoints:
 - `GET /api/categories/:slug`
 - `GET /api/about`
 
-Authentication:
+认证接口：
 
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
 
-Admin endpoints require a valid session cookie:
+后台接口需要有效 session cookie：
 
 - `GET /api/admin/posts`
 - `POST /api/admin/posts`
@@ -188,25 +188,37 @@ Admin endpoints require a valid session cookie:
 - `GET /api/admin/about`
 - `PUT /api/admin/about`
 
-## Content Model
+## 内容模型
 
-Posts have:
+文章包含：
 
-- A URL-safe `slug`
-- A `draft` or `published` status
-- An optional `publishedAt` timestamp
-- Zero or more tags
-- One or more translations in `zh` and/or `en`
+- URL 安全的 `slug`
+- `draft` 或 `published` 状态
+- 可选的 `publishedAt` 发布时间
+- 零个或多个标签
+- 一个或多个 `zh` / `en` 翻译版本
 
-Each translation stores a title, summary, markdown body, and optional SEO metadata.
+每个翻译版本包含标题、摘要、Markdown 正文和可选 SEO 元数据。
 
-## Deployment
+## 图片上传
 
-See [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md) for an Ubuntu deployment flow using:
+后台编辑器支持通过按钮、拖拽和粘贴上传图片。第一版只支持图片文件：
 
-- Nginx for the static frontend
-- systemd for the Fastify API
-- an interactive first-time setup script and a reusable update script
-- GoDaddy DNS pointing at an Aliyun ECS public IP
-- free HTTPS certificates from Let's Encrypt
-- SQLite stored under the deployed project directory
+- 支持 `jpg` / `jpeg`、`png`、`webp`、`gif`
+- 单图大小限制为 10MB
+- 原样保存，不压缩、不转码
+- 图片按文章稳定 `uid` 存储在 `<database-dir>/uploads/images/posts/<post_uid>/`
+- 删除文章时会 best-effort 清理该文章对应的图片目录
+
+新文章需要先保存为草稿，获得文章 `uid` 后才能上传图片。
+
+## 部署
+
+Ubuntu 部署流程见 [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md)，内容包括：
+
+- 使用 Nginx 托管静态前端
+- 使用 systemd 运行 Fastify API
+- 首次交互式部署脚本和可复用更新脚本
+- GoDaddy DNS 指向 Aliyun ECS 公网 IP
+- 使用 Let's Encrypt 免费 HTTPS 证书
+- SQLite 和上传图片存储在部署项目的数据目录下
