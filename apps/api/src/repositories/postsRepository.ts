@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import {
   UpsertPostInputSchema,
   type Category,
@@ -12,6 +13,7 @@ import { ensureTags } from "./tagsRepository.js";
 
 export interface PostRecord {
   id: number;
+  uid: string;
   slug: string;
   status: "draft" | "published";
   publishedAt: string | null;
@@ -24,6 +26,7 @@ export interface PostRecord {
 
 interface PostRow {
   id: number;
+  uid: string;
   slug: string;
   status: "draft" | "published";
   category_id: number | null;
@@ -123,6 +126,7 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
 
   return {
     id: row.id,
+    uid: row.uid,
     slug: row.slug,
     status: row.status,
     publishedAt: row.published_at,
@@ -215,13 +219,14 @@ export function createPost(db: BlogDatabase, input: unknown): PostRecord {
     }
 
     const now = new Date().toISOString();
+    const uid = `p_${crypto.randomUUID()}`;
     const category = ensureCategory(db, parsed.categorySlug);
     const result = db
       .prepare(
-        `INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(parsed.slug, parsed.status, category?.id ?? null, parsed.publishedAt, now, now);
+      .run(uid, parsed.slug, parsed.status, category?.id ?? null, parsed.publishedAt, now, now);
 
     const postId = Number(result.lastInsertRowid);
     replacePostRelations(db, postId, parsed, now);
@@ -272,7 +277,7 @@ export function deletePost(db: BlogDatabase, id: number): boolean {
 export function listPublicPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        WHERE status = 'published'
        ORDER BY published_at DESC, created_at DESC`
@@ -285,7 +290,7 @@ export function listPublicPosts(db: BlogDatabase): PostRecord[] {
 export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT p.id, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+      `SELECT p.id, p.uid, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
        FROM posts p
        INNER JOIN categories c ON c.id = p.category_id
        WHERE p.status = 'published' AND c.slug = ?
@@ -299,7 +304,7 @@ export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): P
 export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT p.id, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+      `SELECT p.id, p.uid, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
        FROM posts p
        INNER JOIN post_tags pt ON pt.post_id = p.id
        INNER JOIN tags t ON t.id = pt.tag_id
@@ -314,7 +319,7 @@ export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRe
 export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord | undefined {
   const row = db
     .prepare(
-      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        WHERE slug = ? AND status = 'published'`
     )
@@ -326,7 +331,7 @@ export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord 
 export function listAdminPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
        FROM posts
        ORDER BY updated_at DESC`
     )
@@ -342,6 +347,6 @@ export function getAdminPostById(db: BlogDatabase, id: number): PostRecord | und
 
 function getPostRowById(db: BlogDatabase, id: number): PostRow | undefined {
   return db
-    .prepare("SELECT id, slug, status, category_id, published_at, created_at, updated_at FROM posts WHERE id = ?")
+    .prepare("SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at FROM posts WHERE id = ?")
     .get(id) as PostRow | undefined;
 }

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL CHECK (status IN ('draft', 'published')),
   category_id INTEGER,

@@ -34,6 +34,7 @@ export type PostTranslation = z.infer<typeof PostTranslationSchema>;
 
 export const PublicPostListItemSchema = z.object({
   id: z.number().int().positive(),
+  uid: z.string().regex(/^p_[0-9a-f-]{36}$/),
   slug: z.string().min(1),
   status: PostStatusSchema,
   publishedAt: DateTimeStringSchema.nullable(),

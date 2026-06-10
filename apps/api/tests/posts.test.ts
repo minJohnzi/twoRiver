@@ -156,6 +156,24 @@ describe("post routes", () => {
       });
 
       expect(createResponse.statusCode).toBe(201);
+      const originalUid = createResponse.json().post.uid;
+      expect(originalUid).toMatch(/^p_[0-9a-f-]{36}$/);
+
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${createResponse.json().post.id}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "renamed-post",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Renamed", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json().post.uid).toBe(originalUid);
 
       const listResponse = await app.inject({
         method: "GET",
@@ -207,6 +225,8 @@ describe("post routes", () => {
       });
 
       expect(createResponse.statusCode).toBe(201);
+      const createdPost = createResponse.json().post;
+      expect(createdPost.uid).toMatch(/^p_[0-9a-f-]{36}$/);
 
       const detailResponse = await app.inject({
         method: "GET",
@@ -215,6 +235,7 @@ describe("post routes", () => {
 
       expect(detailResponse.statusCode).toBe(200);
       const body = detailResponse.json();
+      expect(body.post.uid).toBe(createdPost.uid);
       expect(body.post.slug).toBe("published-bilingual");
       expect(body.post.publishedAt).toBe(publishedAt);
       expect(body.post.category).toEqual(expect.objectContaining({ slug: "engineering", name: "engineering" }));
@@ -427,6 +448,104 @@ describe("post routes", () => {
       expect(response.json()).toEqual({ message: "Post not found" });
     } finally {
       await app.close();
+    }
+  });
+});
+
+describe("post migrations", () => {
+  test("backfills stable post uids for existing databases", () => {
+    const databasePath = createDatabasePath();
+    const db = openDatabase(databasePath);
+    db.exec(`
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('draft', 'published')),
+        category_id INTEGER,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
+      VALUES
+        ('legacy-one', 'draft', NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+        ('legacy-two', 'published', NULL, '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z', '2026-01-02T00:00:00.000Z');
+    `);
+    db.close();
+
+    migrate(databasePath);
+
+    const migratedDb = openDatabase(databasePath);
+    try {
+      const columns = migratedDb.prepare("PRAGMA table_info(posts)").all() as Array<{ name: string }>;
+      const rows = migratedDb.prepare("SELECT uid FROM posts ORDER BY id ASC").all() as Array<{ uid: string | null }>;
+      const indexes = migratedDb.prepare("PRAGMA index_list(posts)").all() as Array<{ name: string; unique: number }>;
+
+      expect(columns.some((column) => column.name === "uid")).toBe(true);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.uid)).toEqual([
+        expect.stringMatching(/^p_[0-9a-f-]{36}$/),
+        expect.stringMatching(/^p_[0-9a-f-]{36}$/)
+      ]);
+      expect(new Set(rows.map((row) => row.uid)).size).toBe(2);
+      expect(indexes).toEqual(expect.arrayContaining([expect.objectContaining({ name: "idx_posts_uid", unique: 1 })]));
+    } finally {
+      migratedDb.close();
+    }
+  });
+
+  test("rejects missing and empty post uids after migrating existing databases", () => {
+    const databasePath = createDatabasePath();
+    const db = openDatabase(databasePath);
+    db.exec(`
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('draft', 'published')),
+        category_id INTEGER,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
+      VALUES ('legacy-one', 'draft', NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    `);
+    db.close();
+
+    migrate(databasePath);
+
+    const migratedDb = openDatabase(databasePath);
+    try {
+      expect(() =>
+        migratedDb
+          .prepare(
+            `INSERT INTO posts (slug, status, category_id, published_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          )
+          .run("missing-uid", "draft", null, null, "2026-01-03T00:00:00.000Z", "2026-01-03T00:00:00.000Z")
+      ).toThrow();
+      expect(() =>
+        migratedDb
+          .prepare(
+            `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(null, "null-uid", "draft", null, null, "2026-01-04T00:00:00.000Z", "2026-01-04T00:00:00.000Z")
+      ).toThrow();
+      expect(() =>
+        migratedDb
+          .prepare(
+            `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run("", "empty-uid", "draft", null, null, "2026-01-05T00:00:00.000Z", "2026-01-05T00:00:00.000Z")
+      ).toThrow();
+      expect(() => migratedDb.prepare("UPDATE posts SET uid = NULL WHERE slug = ?").run("legacy-one")).toThrow();
+      expect(() => migratedDb.prepare("UPDATE posts SET uid = '' WHERE slug = ?").run("legacy-one")).toThrow();
+    } finally {
+      migratedDb.close();
     }
   });
 });
