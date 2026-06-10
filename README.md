@@ -8,6 +8,7 @@ TwoRiver Blog is a minimal bilingual technical blog. It pairs a React/Vite front
 - Public blog pages with post lists, individual post pages, tags, markdown rendering, and syntax highlighting
 - Admin login protected by an HTTP-only session cookie
 - Admin post editor with draft/published status, tag assignment, and markdown preview
+- Admin image uploads for post Markdown, stored under the database data directory
 - Shared Zod schemas for frontend/API type safety
 - SQLite migrations and admin seeding scripts
 - Optional DeepSeek-compatible AI service helpers for summary, tag, and translation drafting
@@ -98,6 +99,8 @@ Production startup rejects the default `SESSION_SECRET` and `ADMIN_PASSWORD`, so
 
 For same-origin production deployment through Nginx, do not set `VITE_API_BASE_URL`; the frontend should call `/api/...` on the same domain.
 
+Uploaded images are stored under `<database-dir>/uploads/`, where `<database-dir>` is the directory containing `DATABASE_PATH`. Back up both the SQLite database and the `uploads/` directory.
+
 ## Common Commands
 
 ```bash
@@ -173,6 +176,7 @@ Admin endpoints require a valid session cookie:
 - `GET /api/admin/posts/:id`
 - `PUT /api/admin/posts/:id`
 - `DELETE /api/admin/posts/:id`
+- `POST /api/admin/uploads/images`
 - `GET /api/admin/categories`
 - `POST /api/admin/categories`
 - `PUT /api/admin/categories/:id`

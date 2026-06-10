@@ -10,8 +10,9 @@ GoDaddy domain
   -> Nginx :80/:443
       -> /              apps/web/dist static frontend
       -> /api/*         Fastify API on 127.0.0.1:4000
+      -> /uploads/*     uploaded images under apps/api/data/uploads
   -> systemd service    keeps the API running
-  -> SQLite             apps/api/data/blog.sqlite
+  -> SQLite + uploads   apps/api/data/blog.sqlite and apps/api/data/uploads
 ```
 
 示例域名统一写作 `example.me`。实际部署时替换成你的域名。
@@ -320,6 +321,11 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location /uploads/ {
+        alias /home/twoRiver/apps/api/data/uploads/;
+        try_files $uri =404;
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
     }
@@ -533,6 +539,7 @@ bash scripts/deploy-update.sh --url https://www.example.me
 
 ```text
 /home/twoRiver/apps/api/data/blog.sqlite.bak.<timestamp>
+/home/twoRiver/apps/api/data/uploads/
 /home/twoRiver/apps/web/dist.bak.<timestamp>
 ```
 
