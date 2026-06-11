@@ -12,8 +12,16 @@ export function getPostImageDirectory(config: AppConfig, postUid: string): strin
   return path.join(getUploadsRoot(config), "images", "posts", postUid);
 }
 
+export function getAboutAvatarDirectory(config: AppConfig): string {
+  return path.join(getUploadsRoot(config), "images", "about");
+}
+
 export function getPostImagePublicUrl(postUid: string, filename: string): string {
   return `${PUBLIC_UPLOAD_PREFIX}/images/posts/${postUid}/${filename}`;
+}
+
+export function getAboutAvatarPublicUrl(filename: string): string {
+  return `${PUBLIC_UPLOAD_PREFIX}/images/about/${filename}`;
 }
 
 export function isValidPostUid(value: string): boolean {

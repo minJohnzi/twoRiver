@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login } from "../api/admin";
+import { login } from "../api/auth";
 
 interface LoginPageProps {
   locale: "zh" | "en";
@@ -8,7 +8,7 @@ interface LoginPageProps {
 
 export function LoginPage({ locale }: LoginPageProps) {
   const navigate = useNavigate();
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

@@ -54,6 +54,7 @@ export function PostPage({ locale }: PostPageProps) {
 
   useEffect(() => {
     let isMounted = true;
+    const controller = new AbortController();
 
     async function loadPost() {
       if (!slug) {
@@ -66,16 +67,16 @@ export function PostPage({ locale }: PostPageProps) {
       setError(null);
 
       try {
-        const { post: nextPost } = await fetchPost(slug);
+        const { post: nextPost } = await fetchPost(slug, { signal: controller.signal });
         if (isMounted) {
           setPost(nextPost);
         }
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load post");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -85,6 +86,7 @@ export function PostPage({ locale }: PostPageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [slug]);
 

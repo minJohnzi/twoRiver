@@ -1,7 +1,8 @@
 import type { Locale, UpsertAboutProfileInput } from "@tworiver/shared";
 import { type FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { fetchAdminAboutProfile, updateAdminAboutProfile } from "../api/admin";
+import { fetchAdminAboutProfile, updateAdminAboutProfile, uploadAdminAboutAvatar } from "../api/admin";
+import { resolveApiAssetUrl } from "../api/client";
 
 interface AdminAboutPageProps {
   locale: Locale;
@@ -22,23 +23,61 @@ const EMPTY_FORM: UpsertAboutProfileInput = {
   socialLinks: []
 };
 
+const SUPPORTED_AVATAR_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const DEFAULT_SOCIAL_LINKS: SocialLinkDraft[] = [
+  { label: "RSS", url: "" },
+  { label: "X", url: "" },
+  { label: "LinkedIn", url: "" },
+  { label: "Ins", url: "" }
+];
+const DEFAULT_SOCIAL_LABELS = new Set(DEFAULT_SOCIAL_LINKS.map((link) => link.label.toLowerCase()));
+
+function isDefaultSocialLabel(label: string): boolean {
+  return DEFAULT_SOCIAL_LABELS.has(label.trim().toLowerCase());
+}
+
+function mergeDefaultSocialLinks(links: SocialLinkDraft[]): SocialLinkDraft[] {
+  const defaultLinks = DEFAULT_SOCIAL_LINKS.map((link) => ({ ...link }));
+  const customLinks: SocialLinkDraft[] = [];
+
+  for (const link of links) {
+    const defaultIndex = defaultLinks.findIndex((defaultLink) => defaultLink.label.toLowerCase() === link.label.trim().toLowerCase());
+    if (defaultIndex >= 0) {
+      const defaultLink = defaultLinks[defaultIndex];
+      if (!defaultLink) {
+        continue;
+      }
+      defaultLinks[defaultIndex] = {
+        label: defaultLink.label,
+        url: link.url
+      };
+    } else {
+      customLinks.push(link);
+    }
+  }
+
+  return [...defaultLinks, ...customLinks];
+}
+
 export function AdminAboutPage({ locale }: AdminAboutPageProps) {
   const [form, setForm] = useState<UpsertAboutProfileInput>(EMPTY_FORM);
-  const [socialLinks, setSocialLinks] = useState<SocialLinkDraft[]>([]);
+  const [socialLinks, setSocialLinks] = useState<SocialLinkDraft[]>(mergeDefaultSocialLinks([]));
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
+    const controller = new AbortController();
 
     async function loadAbout() {
       setIsLoading(true);
       setError(null);
 
       try {
-        const { about } = await fetchAdminAboutProfile();
+        const { about } = await fetchAdminAboutProfile({ signal: controller.signal });
         if (!isMounted) {
           return;
         }
@@ -52,13 +91,13 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
           email: about.email,
           socialLinks: about.socialLinks
         });
-        setSocialLinks(about.socialLinks);
+        setSocialLinks(mergeDefaultSocialLinks(about.socialLinks));
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load about profile");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -68,6 +107,7 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -88,6 +128,27 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
 
   function removeSocialLink(index: number) {
     setSocialLinks((current) => current.filter((_, linkIndex) => linkIndex !== index));
+  }
+
+  async function uploadAvatarFile(file: File) {
+    if (!SUPPORTED_AVATAR_TYPES.has(file.type)) {
+      setError(locale === "zh" ? "仅支持 jpg、png、webp 和 gif 头像。" : "Only jpg, png, webp, and gif avatar images are supported.");
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const { url } = await uploadAdminAboutAvatar(file);
+      updateField("avatarUrl", url);
+      setSuccessMessage(locale === "zh" ? "头像已上传，保存后会更新关于页。" : "Avatar uploaded. Save to update the about page.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to upload avatar");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -112,7 +173,7 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
         email: about.email,
         socialLinks: about.socialLinks
       });
-      setSocialLinks(about.socialLinks);
+      setSocialLinks(mergeDefaultSocialLinks(about.socialLinks));
       setSuccessMessage(locale === "zh" ? "关于页已保存。" : "About page saved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save about profile");
@@ -174,10 +235,41 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
                 <span>{locale === "zh" ? "个人介绍" : "Bio"}</span>
                 <textarea value={form.bio} onChange={(event) => updateField("bio", event.target.value)} rows={8} />
               </label>
-              <label>
-                <span>{locale === "zh" ? "头像 URL" : "Avatar URL"}</span>
-                <input value={form.avatarUrl} onChange={(event) => updateField("avatarUrl", event.target.value)} placeholder="https://..." />
-              </label>
+              <div className="avatar-upload-field">
+                <span>{locale === "zh" ? "头像" : "Avatar"}</span>
+                <div className="avatar-upload-field__body">
+                  {form.avatarUrl.trim() ? (
+                    <img src={resolveApiAssetUrl(form.avatarUrl)} alt={locale === "zh" ? "关于页头像预览" : "About avatar preview"} />
+                  ) : (
+                    <div aria-hidden="true">{(form.displayName || "T").slice(0, 1).toUpperCase()}</div>
+                  )}
+                  <div className="avatar-upload-field__actions">
+                    <label className="secondary-button">
+                      <input
+                        aria-label="Upload avatar image"
+                        className="file-input-hidden"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        disabled={isUploadingAvatar}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.currentTarget.value = "";
+                          if (file) {
+                            void uploadAvatarFile(file);
+                          }
+                        }}
+                      />
+                      {isUploadingAvatar ? (locale === "zh" ? "上传中..." : "Uploading...") : locale === "zh" ? "上传头像" : "Upload avatar"}
+                    </label>
+                    {form.avatarUrl.trim() ? (
+                      <button className="secondary-button" type="button" onClick={() => updateField("avatarUrl", "")}>
+                        {locale === "zh" ? "移除头像" : "Remove avatar"}
+                      </button>
+                    ) : null}
+                    <p className="field-hint">{locale === "zh" ? "支持 jpg、png、webp 和 gif。" : "Supports jpg, png, webp, and gif."}</p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="editor-card">
@@ -188,31 +280,46 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
                 </button>
               </div>
               <label>
-                <span>GitHub</span>
-                <input value={form.githubUrl} onChange={(event) => updateField("githubUrl", event.target.value)} placeholder="https://github.com/..." />
+                <span>{locale === "zh" ? "邮箱" : "Email"}</span>
+                <input aria-label="Email" type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} placeholder="hello@example.com" />
               </label>
               <label>
-                <span>{locale === "zh" ? "邮箱" : "Email"}</span>
-                <input type="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} placeholder="hello@example.com" />
+                <span>GitHub</span>
+                <input aria-label="GitHub" value={form.githubUrl} onChange={(event) => updateField("githubUrl", event.target.value)} placeholder="https://github.com/..." />
               </label>
-              {socialLinks.map((link, index) => (
-                <div className="social-link-fields" key={index}>
-                  <label>
-                    <span>{locale === "zh" ? "链接名称" : "Link label"}</span>
-                    <input value={link.label} onChange={(event) => updateSocialLink(index, "label", event.target.value)} placeholder="X / LinkedIn / Website" />
-                  </label>
-                  <label>
-                    <span>URL</span>
-                    <input value={link.url} onChange={(event) => updateSocialLink(index, "url", event.target.value)} placeholder="https://..." />
-                  </label>
-                  <button className="secondary-button social-link-fields__remove" type="button" onClick={() => removeSocialLink(index)}>
-                    {locale === "zh" ? "移除" : "Remove"}
-                  </button>
-                </div>
-              ))}
-              {socialLinks.length === 0 ? (
-                <p className="muted">{locale === "zh" ? "暂无额外社交链接。" : "No extra social links yet."}</p>
-              ) : null}
+              {socialLinks.map((link, index) => {
+                const isDefault = isDefaultSocialLabel(link.label);
+                return (
+                  <div className="social-link-fields" key={index}>
+                    {isDefault ? (
+                      <label>
+                        <span>{link.label} URL</span>
+                        <input aria-label={`${link.label} URL`} value={link.url} onChange={(event) => updateSocialLink(index, "url", event.target.value)} placeholder={link.label === "RSS" ? "/feed.xml" : "https://..."} />
+                      </label>
+                    ) : (
+                      <label>
+                        <span>{locale === "zh" ? "链接名称" : "Link label"}</span>
+                        <input value={link.label} onChange={(event) => updateSocialLink(index, "label", event.target.value)} placeholder="Website / Notes / Bluesky" />
+                      </label>
+                    )}
+                    <label>
+                      <span>{isDefault ? (locale === "zh" ? "状态" : "Status") : "URL"}</span>
+                      {isDefault ? (
+                        <input value={link.url.trim() ? (locale === "zh" ? "已填写" : "Filled") : locale === "zh" ? "留空则不显示" : "Hidden when empty"} readOnly />
+                      ) : (
+                        <input value={link.url} onChange={(event) => updateSocialLink(index, "url", event.target.value)} placeholder="https://..." />
+                      )}
+                    </label>
+                    {isDefault ? (
+                      <span className="social-link-fields__locked">{locale === "zh" ? "默认" : "Default"}</span>
+                    ) : (
+                      <button className="secondary-button social-link-fields__remove" type="button" onClick={() => removeSocialLink(index)}>
+                        {locale === "zh" ? "移除" : "Remove"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
               {error ? <p className="error-text">{error}</p> : null}
               {successMessage ? <p className="success-text">{successMessage}</p> : null}
             </div>
@@ -223,7 +330,11 @@ export function AdminAboutPage({ locale }: AdminAboutPageProps) {
               <span>{locale === "zh" ? "预览" : "Preview"}</span>
               <strong>{locale === "zh" ? "关于页" : "About"}</strong>
             </div>
-            {form.avatarUrl.trim() ? <img src={form.avatarUrl} alt="" /> : <div className="about-preview__avatar">{(form.displayName || "T").slice(0, 1).toUpperCase()}</div>}
+            {form.avatarUrl.trim() ? (
+              <img src={resolveApiAssetUrl(form.avatarUrl)} alt={locale === "zh" ? "关于页头像预览" : "About avatar preview"} />
+            ) : (
+              <div className="about-preview__avatar">{(form.displayName || "T").slice(0, 1).toUpperCase()}</div>
+            )}
             <h2>{form.displayName || (locale === "zh" ? "关于 TwoRiver" : "About TwoRiver")}</h2>
             <p>{form.headline || (locale === "zh" ? "一句话介绍会显示在这里。" : "Headline will appear here.")}</p>
             <p className="muted">{form.bio || (locale === "zh" ? "个人介绍为空时，前台会显示合理占位。" : "The public page shows a friendly placeholder when bio is empty.")}</p>

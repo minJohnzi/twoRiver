@@ -28,25 +28,31 @@ export function AdminTaxonomyPage({ kind, locale }: AdminTaxonomyPageProps) {
   const isCategory = kind === "categories";
   const title = isCategory ? (locale === "zh" ? "分类管理" : "Category management") : locale === "zh" ? "标签管理" : "Tag management";
 
-  async function loadItems() {
+  async function loadItems(init?: RequestInit) {
     if (isCategory) {
-      const response = await fetchAdminCategories();
+      const response = await fetchAdminCategories(init);
       setItems(response.categories);
       return;
     }
 
-    const response = await fetchAdminTags();
+    const response = await fetchAdminTags(init);
     setItems(response.tags);
   }
 
   useEffect(() => {
+    const controller = new AbortController();
     setEditingId(null);
     setSlug("");
     setName("");
     setError(null);
-    void loadItems().catch((caught: unknown) => {
-      setError(caught instanceof Error ? caught.message : "Failed to load taxonomy");
+    void loadItems({ signal: controller.signal }).catch((caught: unknown) => {
+      if (!controller.signal.aborted) {
+        setError(caught instanceof Error ? caught.message : "Failed to load taxonomy");
+      }
     });
+    return () => {
+      controller.abort();
+    };
   }, [kind]);
 
   function startEdit(item: TaxonomyItem) {

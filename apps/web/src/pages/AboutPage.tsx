@@ -1,5 +1,7 @@
 import type { AboutProfile, Locale } from "@tworiver/shared";
-import { useEffect, useState } from "react";
+import { Icon } from "@iconify/react";
+import { useEffect, useMemo, useState } from "react";
+import { resolveApiAssetUrl } from "../api/client";
 import { fetchAboutProfile } from "../api/posts";
 
 interface AboutPageProps {
@@ -8,9 +10,9 @@ interface AboutPageProps {
 
 interface ContactLink {
   label: string;
-  value: string;
   href: string;
   external: boolean;
+  icon?: string | undefined;
 }
 
 const EMPTY_ABOUT: AboutProfile = {
@@ -22,6 +24,15 @@ const EMPTY_ABOUT: AboutProfile = {
   email: "",
   socialLinks: [],
   updatedAt: null
+};
+
+const CONTACT_ICONS: Record<string, string> = {
+  email: "ic:outline-email",
+  github: "line-md:github",
+  rss: "mdi:rss",
+  x: "prime:twitter",
+  linkedin: "line-md:linkedin",
+  ins: "line-md:instagram"
 };
 
 function isEmptyProfile(about: AboutProfile): boolean {
@@ -37,6 +48,10 @@ function isEmptyProfile(about: AboutProfile): boolean {
 }
 
 function getLinkHref(url: string): string {
+  if (url.startsWith("/")) {
+    return url;
+  }
+
   if (/^https?:\/\//i.test(url) || /^mailto:/i.test(url)) {
     return url;
   }
@@ -44,41 +59,38 @@ function getLinkHref(url: string): string {
   return `https://${url}`;
 }
 
-function getHostLabel(url: string): string {
-  try {
-    return new URL(getLinkHref(url)).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
+function getContactIcon(label: string): string | undefined {
+  return CONTACT_ICONS[label.trim().toLowerCase()];
 }
 
 function buildContactLinks(about: AboutProfile): ContactLink[] {
   const links: ContactLink[] = [];
 
-  if (about.githubUrl.trim()) {
-    links.push({
-      label: "GitHub",
-      value: getHostLabel(about.githubUrl),
-      href: getLinkHref(about.githubUrl),
-      external: true
-    });
-  }
-
   if (about.email.trim()) {
     links.push({
       label: "Email",
-      value: about.email,
       href: `mailto:${about.email}`,
-      external: false
+      external: false,
+      icon: CONTACT_ICONS.email
+    });
+  }
+
+  if (about.githubUrl.trim()) {
+    links.push({
+      label: "GitHub",
+      href: getLinkHref(about.githubUrl),
+      external: true,
+      icon: CONTACT_ICONS.github
     });
   }
 
   for (const link of about.socialLinks) {
+    const href = getLinkHref(link.url);
     links.push({
       label: link.label,
-      value: getHostLabel(link.url),
-      href: getLinkHref(link.url),
-      external: true
+      href,
+      external: !href.startsWith("/"),
+      icon: getContactIcon(link.label)
     });
   }
 
@@ -92,22 +104,23 @@ export function AboutPage({ locale }: AboutPageProps) {
 
   useEffect(() => {
     let isMounted = true;
+    const controller = new AbortController();
 
     async function loadAbout() {
       setIsLoading(true);
       setError(null);
 
       try {
-        const { about: nextAbout } = await fetchAboutProfile();
+        const { about: nextAbout } = await fetchAboutProfile({ signal: controller.signal });
         if (isMounted) {
           setAbout(nextAbout);
         }
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load about page");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -117,11 +130,13 @@ export function AboutPage({ locale }: AboutPageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
-  const hasContent = !isEmptyProfile(about);
-  const contactLinks = buildContactLinks(about);
+  const hasContent = useMemo(() => !isEmptyProfile(about), [about]);
+  const contactLinks = useMemo(() => buildContactLinks(about), [about]);
+  const hasAvatar = Boolean(about.avatarUrl.trim());
   const title = about.displayName.trim() || (locale === "zh" ? "关于 TwoRiver" : "About TwoRiver");
   const headline =
     about.headline.trim() ||
@@ -135,56 +150,81 @@ export function AboutPage({ locale }: AboutPageProps) {
     (locale === "zh"
       ? "个人介绍暂时为空。登录后台后可以补充介绍、头像、GitHub、邮箱和其它社交链接。"
       : "The personal introduction is empty for now. Sign in to add a bio, avatar, GitHub, email, and social links.");
+  const initial = title.slice(0, 1).toUpperCase();
+  const fileStatus = hasContent ? "profile.loaded" : "profile.placeholder";
 
   return (
-    <section className="about-page">
-      <header className="page-heading about-heading">
-        <div>
-          <h1>{title}</h1>
-          {headline ? <p>{headline}</p> : null}
+    <section className="about-page about-page--black-file">
+      <div className="about-file-shell">
+        <div className="about-file-topline" aria-label={locale === "zh" ? "关于页文件状态" : "About file status"}>
+          <span>TWORIVER://ABOUT</span>
+          <span>{fileStatus}</span>
         </div>
-        {about.avatarUrl.trim() ? (
-          <img className="about-avatar" src={about.avatarUrl} alt={locale === "zh" ? `${title} 的头像` : `${title} avatar`} />
-        ) : (
-          <div className="about-avatar about-avatar--placeholder" aria-hidden="true">
-            {title.slice(0, 1).toUpperCase()}
+
+        <header className="about-file-hero">
+          <div className="about-file-title">
+            <p className="about-file-kicker">black file / identity record</p>
+            <h1>{title}</h1>
+            {headline ? <p className="about-file-headline">{headline}</p> : null}
           </div>
-        )}
-      </header>
 
-      {isLoading ? <p className="muted">Loading...</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
-
-      {!isLoading && !error ? (
-        <div className="content-grid">
-          <section className="section-block" aria-labelledby="about-intro">
-            <div className="section-title-row">
-              <h2 id="about-intro">{locale === "zh" ? "个人介绍" : "Introduction"}</h2>
-              <span className="muted">{hasContent ? (locale === "zh" ? "已填写" : "Updated") : locale === "zh" ? "占位" : "Placeholder"}</span>
-            </div>
-            <p className={about.bio.trim() ? "about-copy" : "about-copy about-copy--empty"}>{bio}</p>
-          </section>
-
-          <section className="section-block" aria-labelledby="about-links">
-            <div className="section-title-row">
-              <h2 id="about-links">{locale === "zh" ? "链接" : "Links"}</h2>
-              <span className="muted">{contactLinks.length}</span>
-            </div>
-            {contactLinks.length > 0 ? (
-              <div className="about-link-list" aria-label={locale === "zh" ? "社交链接" : "Social links"}>
-                {contactLinks.map((link) => (
-                  <a key={`${link.label}-${link.href}`} href={link.href} target={link.external ? "_blank" : undefined} rel={link.external ? "noreferrer" : undefined}>
-                    <span>{link.label}</span>
-                    <strong>{link.value}</strong>
-                  </a>
-                ))}
-              </div>
+          <div className={`about-file-portrait${hasAvatar ? " about-file-portrait--round" : ""}`}>
+            {hasAvatar ? (
+              <img src={resolveApiAssetUrl(about.avatarUrl)} alt={locale === "zh" ? `${title} 的头像` : `${title} avatar`} />
             ) : (
-              <p className="muted">{locale === "zh" ? "暂无社交链接。" : "No social links yet."}</p>
+              <div aria-hidden="true">{initial}</div>
             )}
-          </section>
-        </div>
-      ) : null}
+          </div>
+        </header>
+
+        {isLoading ? <p className="about-file-notice">Loading profile...</p> : null}
+        {error ? <p className="about-file-notice about-file-notice--error">{error}</p> : null}
+
+        {!isLoading && !error ? (
+          <div className="about-file-grid">
+            <section className="about-file-copy" aria-labelledby="about-intro">
+              <div className="about-file-section-head">
+                <span>01</span>
+                <h2 id="about-intro">Profile</h2>
+              </div>
+              <p className={about.bio.trim() ? "" : "is-empty"}>{bio}</p>
+            </section>
+
+            <section className="about-file-links" aria-labelledby="about-links">
+              <div className="about-file-section-head">
+                <span>02</span>
+                <h2 id="about-links">Contact</h2>
+              </div>
+
+              {contactLinks.length > 0 ? (
+                <div className="about-contact-icons" aria-label={locale === "zh" ? "社交链接" : "Social links"}>
+                  {contactLinks.map((link) => (
+                    <a
+                      key={`${link.label}-${link.href}`}
+                      className="about-contact-icon"
+                      href={link.href}
+                      target={link.external ? "_blank" : undefined}
+                      rel={link.external ? "noreferrer" : undefined}
+                      aria-label={link.label}
+                      title={link.label}
+                    >
+                      {link.icon ? (
+                        <span data-icon={link.icon} aria-hidden="true">
+                          <Icon icon={link.icon} />
+                        </span>
+                      ) : (
+                        <span aria-hidden="true">{link.label.slice(0, 2).toUpperCase()}</span>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p className="about-file-empty">{locale === "zh" ? "暂无社交链接。" : "No social links yet."}</p>
+              )}
+            </section>
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

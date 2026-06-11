@@ -1,30 +1,30 @@
 import type { AboutProfile, Category, PublicPost, PublicPostListItem, Tag } from "@tworiver/shared";
 import { apiRequest } from "./client";
 
-export function fetchPosts() {
-  return apiRequest<{ posts: PublicPostListItem[] }>("/api/posts");
+export function fetchPosts(init?: RequestInit) {
+  return apiRequest<{ posts: PublicPostListItem[] }>("/api/posts", init);
 }
 
-export function fetchPost(slug: string) {
-  return apiRequest<{ post: PublicPost }>(`/api/posts/${slug}`);
+export function fetchPost(slug: string, init?: RequestInit) {
+  return apiRequest<{ post: PublicPost }>(`/api/posts/${slug}`, init);
 }
 
-export function fetchTags() {
-  return apiRequest<{ tags: Tag[] }>("/api/tags");
+export function fetchTags(init?: RequestInit) {
+  return apiRequest<{ tags: Tag[] }>("/api/tags", init);
 }
 
-export function fetchTagDetail(slug: string) {
-  return apiRequest<{ tag: Tag; posts: PublicPostListItem[] }>(`/api/tags/${slug}`);
+export function fetchTagDetail(slug: string, init?: RequestInit) {
+  return apiRequest<{ tag: Tag; posts: PublicPostListItem[] }>(`/api/tags/${slug}`, init);
 }
 
-export function fetchCategories() {
-  return apiRequest<{ categories: Category[] }>("/api/categories");
+export function fetchCategories(init?: RequestInit) {
+  return apiRequest<{ categories: Category[] }>("/api/categories", init);
 }
 
-export function fetchCategoryDetail(slug: string) {
-  return apiRequest<{ category: Category; posts: PublicPostListItem[] }>(`/api/categories/${slug}`);
+export function fetchCategoryDetail(slug: string, init?: RequestInit) {
+  return apiRequest<{ category: Category; posts: PublicPostListItem[] }>(`/api/categories/${slug}`, init);
 }
 
-export function fetchAboutProfile() {
-  return apiRequest<{ about: AboutProfile }>("/api/about");
+export function fetchAboutProfile(init?: RequestInit) {
+  return apiRequest<{ about: AboutProfile }>("/api/about", init);
 }

@@ -6,6 +6,7 @@ import { getPostIdByUid } from "../repositories/postsRepository.js";
 import {
   ImageUploadValidationError,
   type PostImageUploadFile,
+  storeAboutAvatar,
   storePostImage
 } from "../services/uploads/imageUploadService.js";
 
@@ -44,6 +45,44 @@ async function captureFile(file: MultipartFile): Promise<PostImageUploadFile> {
 export async function adminUploadRoutes(app: FastifyInstance, { config }: AdminUploadRouteOptions) {
   app.addHook("preHandler", app.requireAuth);
   app.addHook("preHandler", app.requireCsrf);
+
+  app.post("/api/admin/uploads/about-avatar", async (request, reply) => {
+    try {
+      const parts = request.parts();
+      let imageFile: PostImageUploadFile | undefined;
+
+      for await (const part of parts) {
+        if (part.type === "file" && part.fieldname === "file") {
+          if (imageFile) {
+            await discardFile(part);
+            continue;
+          }
+          imageFile = await captureFile(part);
+        } else if (part.type === "file") {
+          await discardFile(part);
+        }
+      }
+
+      if (!imageFile) {
+        reply.code(400).send({ message: "Missing avatar upload input" });
+        return;
+      }
+
+      const image = await storeAboutAvatar(config, imageFile);
+      reply.code(201);
+      return image;
+    } catch (error) {
+      if (error instanceof ImageUploadValidationError) {
+        reply.code(400).send({ message: error.message });
+        return;
+      }
+      if (isPayloadTooLarge(error)) {
+        reply.code(400).send({ message: "Image is too large" });
+        return;
+      }
+      throw error;
+    }
+  });
 
   app.post("/api/admin/uploads/images", async (request, reply) => {
     try {

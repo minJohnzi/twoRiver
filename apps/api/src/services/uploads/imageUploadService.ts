@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { MultipartFile } from "@fastify/multipart";
 import type { AppConfig } from "../../config.js";
-import { getPostImageDirectory, getPostImagePublicUrl, isValidPostUid } from "./uploadPaths.js";
+import {
+  getAboutAvatarDirectory,
+  getAboutAvatarPublicUrl,
+  getPostImageDirectory,
+  getPostImagePublicUrl,
+  isValidPostUid
+} from "./uploadPaths.js";
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -26,6 +32,19 @@ export class ImageUploadValidationError extends Error {
     super(message);
     this.name = "ImageUploadValidationError";
   }
+}
+
+export async function storeAboutAvatar(config: AppConfig, file: PostImageUploadFile): Promise<Pick<StoredImage, "url">> {
+  const { buffer, extension } = await validateImageFile(file);
+  const directory = getAboutAvatarDirectory(config);
+  await fs.mkdir(directory, { recursive: true });
+
+  const filename = `${crypto.randomUUID()}.${extension}`;
+  await fs.writeFile(path.join(directory, filename), buffer, { flag: "wx" });
+
+  return {
+    url: getAboutAvatarPublicUrl(filename)
+  };
 }
 
 export interface StoredImage {
@@ -56,11 +75,7 @@ function hasValidImageSignature(buffer: Buffer, mimetype: string): boolean {
   return false;
 }
 
-export async function storePostImage(config: AppConfig, postUid: string, file: PostImageUploadFile): Promise<StoredImage> {
-  if (!isValidPostUid(postUid)) {
-    throw new ImageUploadValidationError("Invalid post UID");
-  }
-
+async function validateImageFile(file: PostImageUploadFile): Promise<{ buffer: Buffer; extension: string }> {
   const extension = ALLOWED_TYPES.get(file.mimetype);
   if (!extension) {
     throw new ImageUploadValidationError("Unsupported image type");
@@ -80,6 +95,15 @@ export async function storePostImage(config: AppConfig, postUid: string, file: P
     throw new ImageUploadValidationError("Image bytes do not match MIME type");
   }
 
+  return { buffer, extension };
+}
+
+export async function storePostImage(config: AppConfig, postUid: string, file: PostImageUploadFile): Promise<StoredImage> {
+  if (!isValidPostUid(postUid)) {
+    throw new ImageUploadValidationError("Invalid post UID");
+  }
+
+  const { buffer, extension } = await validateImageFile(file);
   const directory = getPostImageDirectory(config, postUid);
   await fs.mkdir(directory, { recursive: true });
 

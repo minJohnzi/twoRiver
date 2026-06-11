@@ -176,6 +176,31 @@ async function uploadImage(
   });
 }
 
+async function uploadAboutAvatar(
+  app: FastifyInstance,
+  auth: { cookie: string; csrfToken: string },
+  input: { filename?: string; contentType?: string; bytes?: Buffer } = {}
+) {
+  const multipart = multipartBody({
+    file: {
+      filename: input.filename ?? "avatar.png",
+      contentType: input.contentType ?? "image/png",
+      bytes: input.bytes ?? pngBytes
+    }
+  });
+
+  return app.inject({
+    method: "POST",
+    url: "/api/admin/uploads/about-avatar",
+    headers: {
+      cookie: auth.cookie,
+      "x-csrf-token": auth.csrfToken,
+      "content-type": multipart.contentType
+    },
+    payload: multipart.body
+  });
+}
+
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
@@ -215,6 +240,26 @@ describe("admin image uploads", () => {
       const body = response.json() as { url: string; markdown: string };
       expect(body.url).toMatch(new RegExp(`^/uploads/images/posts/${post.uid}/[0-9a-f-]{36}\\.png$`));
       expect(body.markdown).toContain(body.url);
+
+      const fileResponse = await app.inject({ method: "GET", url: body.url });
+      expect(fileResponse.statusCode).toBe(200);
+      expect(fileResponse.headers["content-type"]).toContain("image/png");
+      expect(fileResponse.rawPayload).toEqual(pngBytes);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("uploads an about avatar without requiring a post uid and serves it", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await uploadAboutAvatar(app, auth);
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json() as { url: string };
+      expect(body.url).toMatch(/^\/uploads\/images\/about\/[0-9a-f-]{36}\.png$/);
 
       const fileResponse = await app.inject({ method: "GET", url: body.url });
       expect(fileResponse.statusCode).toBe(200);

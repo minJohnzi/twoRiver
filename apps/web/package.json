@@ -12,6 +12,7 @@
     "lint": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@iconify/react": "^5.2.1",
     "@tworiver/shared": "workspace:*",
     "@vitejs/plugin-react": "^4.5.1",
     "dompurify": "^3.4.8",

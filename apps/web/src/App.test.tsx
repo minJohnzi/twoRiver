@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { fetchCurrentUser, fetchAdminPosts, logout } from "./api/admin";
+import { fetchAdminCategories, fetchAdminPosts } from "./api/admin";
+import { fetchCurrentUser, logout } from "./api/auth";
 import {
   fetchCategories,
   fetchCategoryDetail,
@@ -14,7 +15,6 @@ import {
 } from "./api/posts";
 
 vi.mock("./api/admin", () => ({
-  fetchCurrentUser: vi.fn(),
   fetchAdminPosts: vi.fn(),
   fetchAdminPost: vi.fn(),
   createAdminPost: vi.fn(),
@@ -29,7 +29,11 @@ vi.mock("./api/admin", () => ({
   deleteAdminCategory: vi.fn(),
   createAdminTag: vi.fn(),
   updateAdminTag: vi.fn(),
-  deleteAdminTag: vi.fn(),
+  deleteAdminTag: vi.fn()
+}));
+
+vi.mock("./api/auth", () => ({
+  fetchCurrentUser: vi.fn(),
   logout: vi.fn()
 }));
 
@@ -44,6 +48,7 @@ vi.mock("./api/posts", () => ({
 }));
 
 const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser);
+const mockedFetchAdminCategories = vi.mocked(fetchAdminCategories);
 const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
 const mockedLogout = vi.mocked(logout);
 const mockedFetchPosts = vi.mocked(fetchPosts);
@@ -76,6 +81,18 @@ describe("admin route protection", () => {
     expect(mockedFetchAdminPosts).not.toHaveBeenCalled();
   });
 
+  it("starts the admin login form with an empty username", async () => {
+    window.localStorage.setItem("tworiver_locale", "en");
+
+    render(
+      <MemoryRouter initialEntries={["/admin/login"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByLabelText("Username")).toHaveValue("");
+  });
+
   it("shows a logout entry for authenticated admins and clears the session", async () => {
     mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
     mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
@@ -92,6 +109,22 @@ describe("admin route protection", () => {
 
     await waitFor(() => expect(mockedLogout).toHaveBeenCalledTimes(1));
     expect(await screen.findByRole("heading", { name: "进入写作中控室" })).toBeInTheDocument();
+  });
+  it("reuses the verified admin session across protected admin pages", async () => {
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
+    mockedFetchAdminCategories.mockResolvedValue({ categories: [] });
+
+    render(
+      <MemoryRouter initialEntries={["/admin/posts"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: "分类管理" }));
+
+    await screen.findByRole("heading", { name: "分类管理" });
+    expect(mockedFetchCurrentUser).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -116,7 +149,7 @@ describe("public taxonomy routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Categories" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Engineering" })).toHaveAttribute("href", "/categories/engineering");
+    expect(await screen.findByRole("link", { name: "Engineering" })).toHaveAttribute("href", "/categories/engineering");
 
     cleanup();
 
@@ -127,7 +160,7 @@ describe("public taxonomy routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Tags" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Release" })).toHaveAttribute("href", "/tags/release");
+    expect(await screen.findByRole("link", { name: "Release" })).toHaveAttribute("href", "/tags/release");
   });
 
   it("renders taxonomy detail pages and filters posts from the API response", async () => {
@@ -192,7 +225,7 @@ describe("public taxonomy routes", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
   });
 

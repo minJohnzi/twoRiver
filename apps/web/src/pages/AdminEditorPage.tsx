@@ -1,5 +1,5 @@
 import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
-import { type ClipboardEvent, type DragEvent, type FormEvent, useEffect, useRef, useState } from "react";
+import { type ClipboardEvent, type DragEvent, type FormEvent, useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createAdminPost,
@@ -184,7 +184,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   useEffect(() => {
     let isMounted = true;
-    fetchAdminCategories()
+    const controller = new AbortController();
+    fetchAdminCategories({ signal: controller.signal })
       .then(({ categories: nextCategories }) => {
         if (isMounted) {
           setCategories(nextCategories);
@@ -193,6 +194,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       .catch(() => undefined);
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -203,6 +205,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     }
 
     let isMounted = true;
+    const controller = new AbortController();
     const selectedPostId = postId;
 
     async function loadPost() {
@@ -210,7 +213,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       setError(null);
 
       try {
-        const { post } = await fetchAdminPost(selectedPostId);
+        const { post } = await fetchAdminPost(selectedPostId, { signal: controller.signal });
         if (!isMounted) {
           return;
         }
@@ -232,11 +235,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         setTagText(post.tags.map((tag) => tag.slug).join(", "));
         setTranslations(nextTranslations);
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load post");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -246,6 +249,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [postId]);
 
@@ -492,6 +496,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   const currentTranslation = translations[activeLocale];
+  const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const targetLocale = otherLocale(activeLocale);
   const isBusy = Boolean(saveAction) || isDeleting || isTranslating;
   const canPreview = Boolean(postId && slug.trim() && status !== "draft");
@@ -734,7 +739,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
               <span>{locale === "zh" ? "预览" : "Preview"}</span>
               <strong>{languageLabel(activeLocale, locale)}</strong>
             </div>
-            <MarkdownPreview markdown={currentTranslation.contentMarkdown} />
+            <MarkdownPreview markdown={deferredMarkdown} />
           </aside>
         </div>
       </form>

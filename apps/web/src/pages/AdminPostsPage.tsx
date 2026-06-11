@@ -77,22 +77,23 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
 
   useEffect(() => {
     let isMounted = true;
+    const controller = new AbortController();
 
     async function loadPosts() {
       setIsLoading(true);
       setError(null);
 
       try {
-        const { posts: nextPosts } = await fetchAdminPosts();
+        const { posts: nextPosts } = await fetchAdminPosts({ signal: controller.signal });
         if (isMounted) {
           setPosts(nextPosts);
         }
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load admin posts");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -102,6 +103,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -125,9 +127,17 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
     [categoryFilter, posts, statusFilter, tagFilter]
   );
 
-  const publishedCount = posts.filter((post) => post.status === "published").length;
-  const draftCount = posts.filter((post) => post.status === "draft").length;
-  const hiddenCount = posts.filter((post) => post.status === "hidden").length;
+  const statusCounts = useMemo(
+    () =>
+      posts.reduce(
+        (counts, post) => {
+          counts[post.status] += 1;
+          return counts;
+        },
+        { draft: 0, hidden: 0, published: 0 }
+      ),
+    [posts]
+  );
 
   return (
     <section className="admin-workspace">
@@ -164,15 +174,15 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
         </div>
         <div>
           <span>{locale === "zh" ? "已发布" : "Published"}</span>
-          <strong>{publishedCount}</strong>
+          <strong>{statusCounts.published}</strong>
         </div>
         <div>
           <span>{locale === "zh" ? "草稿" : "Drafts"}</span>
-          <strong>{draftCount}</strong>
+          <strong>{statusCounts.draft}</strong>
         </div>
         <div>
           <span>{locale === "zh" ? "隐藏/下架" : "Hidden"}</span>
-          <strong>{hiddenCount}</strong>
+          <strong>{statusCounts.hidden}</strong>
         </div>
       </div>
 

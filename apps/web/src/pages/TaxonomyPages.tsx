@@ -73,19 +73,21 @@ export function CategoryListPage({ locale: _locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    fetchCategories()
+    const controller = new AbortController();
+    fetchCategories({ signal: controller.signal })
       .then(({ categories: nextCategories }) => {
         if (isMounted) {
           setCategories(nextCategories);
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load categories");
         }
       });
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -102,19 +104,21 @@ export function TagListPage({ locale: _locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    fetchTags()
+    const controller = new AbortController();
+    fetchTags({ signal: controller.signal })
       .then(({ tags: nextTags }) => {
         if (isMounted) {
           setTags(nextTags);
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tags");
         }
       });
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -133,7 +137,8 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    fetchCategoryDetail(slug)
+    const controller = new AbortController();
+    fetchCategoryDetail(slug, { signal: controller.signal })
       .then((response) => {
         if (isMounted) {
           setCategory(response.category);
@@ -141,12 +146,13 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load category");
         }
       });
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [slug]);
 
@@ -175,7 +181,8 @@ export function TagDetailPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    fetchTagDetail(slug)
+    const controller = new AbortController();
+    fetchTagDetail(slug, { signal: controller.signal })
       .then((response) => {
         if (isMounted) {
           setTag(response.tag);
@@ -183,12 +190,13 @@ export function TagDetailPage({ locale }: LocaleProps) {
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tag");
         }
       });
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [slug]);
 

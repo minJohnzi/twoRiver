@@ -9,35 +9,14 @@ import type {
   UpsertPostInput
 } from "@tworiver/shared";
 import { apiRequest } from "./client";
+export { fetchCurrentUser, login, logout, type CurrentUser } from "./auth";
 
-export interface CurrentUser {
-  id: number;
-  username: string;
+export function fetchAdminPosts(init?: RequestInit) {
+  return apiRequest<{ posts: PublicPost[] }>("/api/admin/posts", init);
 }
 
-export function login(username: string, password: string) {
-  return apiRequest<{ user: CurrentUser }>("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password })
-  });
-}
-
-export function logout() {
-  return apiRequest<{ ok: true }>("/api/auth/logout", {
-    method: "POST"
-  });
-}
-
-export function fetchCurrentUser() {
-  return apiRequest<{ user: CurrentUser }>("/api/auth/me");
-}
-
-export function fetchAdminPosts() {
-  return apiRequest<{ posts: PublicPost[] }>("/api/admin/posts");
-}
-
-export function fetchAdminPost(id: number) {
-  return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}`);
+export function fetchAdminPost(id: number, init?: RequestInit) {
+  return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}`, init);
 }
 
 export function deleteAdminPost(id: number) {
@@ -76,6 +55,16 @@ export function uploadAdminPostImage(input: { postUid: string; file: File }) {
   });
 }
 
+export function uploadAdminAboutAvatar(file: File) {
+  const body = new FormData();
+  body.set("file", file);
+
+  return apiRequest<Pick<UploadedImage, "url">>("/api/admin/uploads/about-avatar", {
+    method: "POST",
+    body
+  });
+}
+
 export interface TranslatePostDraftInput {
   source: Pick<PostTranslation, "locale" | "title" | "summary" | "contentMarkdown">;
   targetLocale: Locale;
@@ -93,8 +82,8 @@ export function translateAdminPostDraft(input: TranslatePostDraftInput) {
   });
 }
 
-export function fetchAdminAboutProfile() {
-  return apiRequest<{ about: AboutProfile }>("/api/admin/about");
+export function fetchAdminAboutProfile(init?: RequestInit) {
+  return apiRequest<{ about: AboutProfile }>("/api/admin/about", init);
 }
 
 export function updateAdminAboutProfile(input: UpsertAboutProfileInput) {
@@ -104,8 +93,8 @@ export function updateAdminAboutProfile(input: UpsertAboutProfileInput) {
   });
 }
 
-export function fetchAdminTags() {
-  return apiRequest<{ tags: Tag[] }>("/api/admin/tags");
+export function fetchAdminTags(init?: RequestInit) {
+  return apiRequest<{ tags: Tag[] }>("/api/admin/tags", init);
 }
 
 export function createAdminTag(input: { slug: string; name: string }) {
@@ -128,8 +117,8 @@ export function deleteAdminTag(id: number) {
   });
 }
 
-export function fetchAdminCategories() {
-  return apiRequest<{ categories: Category[] }>("/api/admin/categories");
+export function fetchAdminCategories(init?: RequestInit) {
+  return apiRequest<{ categories: Category[] }>("/api/admin/categories", init);
 }
 
 export function createAdminCategory(input: { slug: string; name: string }) {

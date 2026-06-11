@@ -37,24 +37,28 @@ export function HomePage({ locale }: HomePageProps) {
 
   useEffect(() => {
     let isMounted = true;
+    const controller = new AbortController();
 
     async function loadContent() {
       setIsLoading(true);
       setError(null);
 
       try {
-        const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([fetchPosts(), fetchTags()]);
+        const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([
+          fetchPosts({ signal: controller.signal }),
+          fetchTags({ signal: controller.signal })
+        ]);
 
         if (isMounted) {
           setPosts(nextPosts);
           setTags(nextTags);
         }
       } catch (caught) {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load posts");
         }
       } finally {
-        if (isMounted) {
+        if (isMounted && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
@@ -64,6 +68,7 @@ export function HomePage({ locale }: HomePageProps) {
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, []);
 
@@ -82,7 +87,7 @@ export function HomePage({ locale }: HomePageProps) {
       <section className="section-block home-feed" aria-labelledby="latest-notes">
         <div className="section-title-row">
           <div>
-            <h1 id="latest-notes">Writing Something</h1>
+            <h1 id="latest-notes">Just Writing Something</h1>
             {!isLoading && !error ? <p>{postCountLabel}</p> : null}
           </div>
           <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
