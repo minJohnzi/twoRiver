@@ -1,14 +1,14 @@
 # TwoRiver Blog
 
-TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前端、Fastify API、SQLite 持久化和单管理员发布工作流组成。
+TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前端、Fastify API、SQLite 持久化和单管理员发布工作流组成，适合部署到一台轻量 Ubuntu 服务器上。
 
 ## 功能特性
 
 - 支持中文和英文两套文章内容
-- 公开博客页面包含文章列表、文章详情、标签、Markdown 渲染和代码高亮
-- 管理员登录使用 HTTP-only session cookie 保护
-- 后台文章编辑器支持草稿/发布状态、标签分配和 Markdown 预览
-- 支持在文章 Markdown 中上传图片，图片存储在数据库目录下
+- 公开博客页面包含首页、文章详情、分类、标签、关于页、Markdown 渲染和代码高亮
+- 管理员登录使用 HTTP-only session cookie 保护，并对后台写操作校验 CSRF token
+- 后台文章编辑器支持草稿/发布状态、分类、标签分配、Markdown 预览和 AI 辅助草稿
+- 支持在文章 Markdown 中上传图片，也支持上传关于页头像，文件存储在数据库目录下
 - 前后端共享 Zod schema，保证类型一致
 - 提供 SQLite 迁移和管理员初始化脚本
 - 可选 DeepSeek 兼容 AI 服务，用于摘要、标签和翻译草稿辅助
@@ -31,8 +31,8 @@ TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前
 |-- packages/
 |   `-- shared/       # 共享 Zod schema 和 TypeScript 类型
 |-- docs/
-|   |-- deployment/   # Ubuntu 部署和运维说明
-|   |-- superpowers/  # 历史设计与实现计划记录
+|   |-- deployment/   # Ubuntu 部署说明
+|   |-- operations.md # 日常运维、备份和恢复
 |   `-- checklist.md  # 手动 QA 清单
 |-- scripts/          # 服务器部署和更新脚本
 |-- .env.example
@@ -100,6 +100,8 @@ pnpm dev
 如果通过 Nginx 做同源生产部署，不要设置 `VITE_API_BASE_URL`；前端应直接请求同域下的 `/api/...`。
 
 上传图片存储在 `<database-dir>/uploads/` 下，其中 `<database-dir>` 是 `DATABASE_PATH` 所在目录。备份时需要同时备份 SQLite 数据库和 `uploads/` 目录。
+
+更多运行、备份和排障建议见 [docs/operations.md](docs/operations.md)。
 
 ## 常用命令
 
@@ -177,6 +179,7 @@ bash -n scripts/deploy-update.sh
 - `PUT /api/admin/posts/:id`
 - `DELETE /api/admin/posts/:id`
 - `POST /api/admin/uploads/images`
+- `POST /api/admin/uploads/about-avatar`
 - `GET /api/admin/categories`
 - `POST /api/admin/categories`
 - `PUT /api/admin/categories/:id`
@@ -195,6 +198,7 @@ bash -n scripts/deploy-update.sh
 - URL 安全的 `slug`
 - `draft` 或 `published` 状态
 - 可选的 `publishedAt` 发布时间
+- 可选分类
 - 零个或多个标签
 - 一个或多个 `zh` / `en` 翻译版本
 
@@ -212,9 +216,11 @@ bash -n scripts/deploy-update.sh
 
 新文章需要先保存为草稿，获得文章 `uid` 后才能上传图片。
 
+关于页头像通过独立上传接口保存到 `<database-dir>/uploads/images/about/`。替换头像后，建议在定期巡检时清理不再被引用的旧头像文件。
+
 ## 部署
 
-Ubuntu 部署流程见 [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md)，内容包括：
+文档入口见 [docs/README.md](docs/README.md)。Ubuntu 部署流程见 [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md)，内容包括：
 
 - 使用 Nginx 托管静态前端
 - 使用 systemd 运行 Fastify API
@@ -222,3 +228,5 @@ Ubuntu 部署流程见 [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md)，
 - GoDaddy DNS 指向 Aliyun ECS 公网 IP
 - 使用 Let's Encrypt 免费 HTTPS 证书
 - SQLite 和上传图片存储在部署项目的数据目录下
+
+历史计划文档不再提交到仓库；本地生成的 `docs/superpowers/` 已加入 `.gitignore`。

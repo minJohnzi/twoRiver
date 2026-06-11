@@ -5,9 +5,11 @@ test-results/
 apps/web/.vite/
 .codex/
 .superpowers/
+docs/superpowers/
 .env
 .env.local
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 apps/api/data/
+apps/api/apps/

@@ -1,4 +1,4 @@
-# Ubuntu + Aliyun + GoDaddy Deployment
+# Ubuntu + 阿里云 + GoDaddy 部署指南
 
 这份文档记录 TwoRiver Blog 部署到阿里云 Ubuntu ECS，并绑定 GoDaddy 域名的完整流程。
 
@@ -17,7 +17,7 @@ GoDaddy domain
 
 示例域名统一写作 `example.me`。实际部署时替换成你的域名。
 
-## 1. Server Checklist
+## 1. 服务器检查清单
 
 推荐系统：
 
@@ -47,7 +47,7 @@ ssh root@your-aliyun-public-ip
 
 本文后续服务器文件编辑命令统一使用 `vim`。
 
-## 2. Install Base Packages
+## 2. 安装基础软件包
 
 ```bash
 apt update
@@ -82,7 +82,7 @@ which pnpm
 
 如果 `which pnpm` 输出 `/usr/local/bin/pnpm`，后面的 systemd 服务也使用这个路径。
 
-## 3. Prepare Project
+## 3. 准备项目代码
 
 把代码放到服务器，例如：
 
@@ -95,7 +95,7 @@ pnpm install --frozen-lockfile
 
 如果代码已经在 `/home/twoRiver`，直接进入目录安装依赖即可。
 
-## 4. Production Environment
+## 4. 配置生产环境变量
 
 创建生产环境文件：
 
@@ -133,9 +133,9 @@ CORS_ALLOWED_ORIGINS=http://example.me,http://www.example.me
 openssl rand -hex 32
 ```
 
-## 5. Build and Initialize Database
+## 5. 构建并初始化数据库
 
-### Option A: Interactive Setup Script
+### 方式 A：交互式部署脚本
 
 如果是在服务器上做首次部署，推荐使用交互式部署脚本：
 
@@ -196,7 +196,7 @@ bash -n scripts/deploy-setup.sh
 
 如果没有输出，表示 Bash 语法检查通过。
 
-### Option B: Manual Build
+### 方式 B：手动构建
 
 如果不使用脚本，可以手动执行：
 
@@ -229,7 +229,7 @@ API 启动脚本是：
 pnpm --filter @tworiver/api start
 ```
 
-## 6. Run API with systemd
+## 6. 使用 systemd 运行 API
 
 创建 systemd 服务：
 
@@ -293,7 +293,7 @@ journalctl -u tworiver-api -n 80 --no-pager
 - `CORS_ALLOWED_ORIGINS` 在 `NODE_ENV=production` 时没有配置。
 - `ExecStart` 中的 `pnpm` 路径不对。
 
-## 7. Configure Nginx
+## 7. 配置 Nginx
 
 创建站点配置：
 
@@ -418,7 +418,7 @@ ufw allow 'Nginx Full'
 ufw reload
 ```
 
-## 9. Enable HTTPS
+## 9. 启用 HTTPS
 
 HTTPS 可以使用 Let's Encrypt 免费证书，不需要购买 GoDaddy 或阿里云付费 SSL 证书。
 
@@ -494,7 +494,7 @@ systemctl status tworiver-api --no-pager
 certbot renew --dry-run
 ```
 
-## 10. Deployment Update Flow
+## 10. 部署更新流程
 
 推荐使用仓库里的通用更新脚本：
 
@@ -618,7 +618,7 @@ curl https://example.me/api/health
 systemctl status tworiver-api --no-pager
 ```
 
-## 11. Useful Diagnostics
+## 11. 常用诊断命令
 
 API 服务状态：
 
@@ -662,7 +662,7 @@ curl http://127.0.0.1/api/health
 curl https://example.me/api/health
 ```
 
-## 12. Notes for Mainland China ECS
+## 12. 中国大陆 ECS 注意事项
 
 如果 ECS 地域在中国大陆，并且网站要通过域名正式对外提供服务，通常需要 ICP 备案。
 
