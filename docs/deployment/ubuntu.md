@@ -90,7 +90,7 @@ which pnpm
 cd /home
 git clone your-repository-url twoRiver
 cd /home/twoRiver
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod=false
 ```
 
 如果代码已经在 `/home/twoRiver`，直接进入目录安装依赖即可。
@@ -165,7 +165,7 @@ pnpm 路径，默认自动检测
 
 ```text
 生成或更新 /home/twoRiver/.env
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod=false
 pnpm build
 加载 .env 后执行 migrate
 加载 .env 后执行 seed:admin
@@ -517,7 +517,7 @@ bash -n scripts/deploy-update.sh
 ```text
 git pull
 如果没有新 commit，自动跳过部署
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod=false
 备份 SQLite 数据库
 备份 apps/web/dist
 pnpm build
@@ -582,7 +582,7 @@ bash scripts/deploy-update.sh --seed-admin --force
 --dry-run          只打印会执行的命令，不实际执行
 --no-backup        不备份 SQLite 或 apps/web/dist
 --skip-pull        不执行 git pull
---skip-install     不执行 pnpm install --frozen-lockfile
+--skip-install     不执行 pnpm install --frozen-lockfile --prod=false
 --skip-build       不执行 pnpm build
 --skip-migrate     不执行数据库迁移
 --no-api-restart   不重启 API
@@ -603,7 +603,7 @@ bash scripts/deploy-update.sh --dry-run
 ```bash
 cd /home/twoRiver
 git pull
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod=false
 pnpm build
 pnpm --filter @tworiver/api migrate
 systemctl restart tworiver-api

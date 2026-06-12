@@ -233,7 +233,7 @@ install_and_build() {
   cd "$PROJECT_DIR"
 
   log "Installing dependencies"
-  "$PNPM_BIN" install --frozen-lockfile
+  env CI=true "$PNPM_BIN" install --frozen-lockfile --prod=false
 
   log "Building project"
   "$PNPM_BIN" build

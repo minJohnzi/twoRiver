@@ -42,7 +42,7 @@ Options:
   --dry-run            Print commands without executing them.
   --no-backup          Do not back up SQLite or apps/web/dist.
   --skip-pull          Do not run git pull.
-  --skip-install       Do not run pnpm install --frozen-lockfile.
+  --skip-install       Do not run pnpm install --frozen-lockfile --prod=false.
   --skip-build         Do not run pnpm build.
   --skip-migrate       Do not run API migration.
   --no-api-restart     Do not restart the API systemd service.
@@ -306,7 +306,7 @@ backup_dist() {
 
 install_dependencies() {
   if [[ "$DO_INSTALL" -eq 1 ]]; then
-    run pnpm install --frozen-lockfile
+    run env CI=true pnpm install --frozen-lockfile --prod=false
   fi
 }
 
