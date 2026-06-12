@@ -10,6 +10,7 @@
     "typecheck": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit",
     "test": "pnpm --filter @tworiver/shared build && vitest run",
     "lint": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit",
+    "cleanup:uploads": "pnpm --filter @tworiver/shared build && tsx src/maintenance/cleanupOrphanUploads.ts",
     "migrate": "tsx src/db/migrate.ts",
     "seed:admin": "pnpm --filter @tworiver/shared build && tsx src/db/seedAdmin.ts"
   },

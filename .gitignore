@@ -1,15 +1,33 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build and test outputs
 dist/
 coverage/
 test-results/
+playwright-report/
 apps/web/.vite/
+*.tsbuildinfo
+
+# Local agent/tool state
 .codex/
 .superpowers/
 docs/superpowers/
+
+# Environment and secrets
 .env
-.env.local
+.env.*
+!.env.example
+
+# Runtime data
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 apps/api/data/
 apps/api/apps/
+
+# Logs and OS/editor noise
+*.log
+.DS_Store
+Thumbs.db

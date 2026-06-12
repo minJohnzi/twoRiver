@@ -192,3 +192,35 @@ certbot renew --dry-run
 - `CORS_ALLOWED_ORIGINS` 只填写可信域名。
 - 服务器只对公网开放 `22`、`80`、`443`，不要开放 API 端口 `4000`。
 - 定期更新系统安全补丁，并保留最近几次数据库和上传目录备份。
+
+## CI and local verification
+
+Pull requests and pushes to `main` run the GitHub Actions workflow in `.github/workflows/ci.yml`.
+The workflow installs dependencies with pnpm, then runs:
+
+```bash
+pnpm check:encoding
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+Run the same commands locally before deployment when possible. On Windows PowerShell, if `pnpm` is blocked by execution policy, use the `.cmd` shim, for example:
+
+```powershell
+C:\nvm4w\nodejs\pnpm.cmd check:encoding
+```
+
+`pnpm check:encoding` validates decoded UTF-8 text content. It is intended to catch real replacement characters or mojibake committed to the repository; terminal display issues alone should not fail the check.
+
+## Upload cleanup
+
+The API includes `cleanupOrphanUploads(config, db, { dryRun })` in `apps/api/src/services/uploads/orphanCleanupService.ts`.
+Use dry-run mode first before deleting files:
+
+```bash
+pnpm --filter @tworiver/api cleanup:uploads
+pnpm --filter @tworiver/api cleanup:uploads -- --delete
+```
+
+The cleanup keeps upload files referenced by post Markdown or the about avatar URL, removes empty upload subdirectories after deletion, and reports or removes unreferenced files under the configured uploads root.
