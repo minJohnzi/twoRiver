@@ -11,7 +11,7 @@ import {
   isValidPostUid
 } from "./uploadPaths.js";
 
-export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const ALLOWED_TYPES = new Map([
   ["image/jpeg", "jpg"],

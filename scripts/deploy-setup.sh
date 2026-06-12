@@ -293,6 +293,7 @@ write_nginx_site() {
 server {
     listen 80;
     server_name $server_names;
+    client_max_body_size 5m;
 
     root $PROJECT_DIR/apps/web/dist;
     index index.html;
@@ -305,6 +306,11 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /uploads/ {
+        alias $PROJECT_DIR/apps/api/data/uploads/;
+        try_files \$uri =404;
     }
 
     location / {

@@ -307,6 +307,7 @@ vim /etc/nginx/sites-available/tworiver
 server {
     listen 80;
     server_name example.me www.example.me;
+    client_max_body_size 5m;
 
     root /home/twoRiver/apps/web/dist;
     index index.html;

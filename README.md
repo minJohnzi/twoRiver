@@ -209,7 +209,7 @@ bash -n scripts/deploy-update.sh
 后台编辑器支持通过按钮、拖拽和粘贴上传图片。第一版只支持图片文件：
 
 - 支持 `jpg` / `jpeg`、`png`、`webp`、`gif`
-- 单图大小限制为 10MB
+- 单图大小限制为 5MB
 - 原样保存，不压缩、不转码
 - 图片按文章稳定 `uid` 存储在 `<database-dir>/uploads/images/posts/<post_uid>/`
 - 删除文章时会 best-effort 清理该文章对应的图片目录
