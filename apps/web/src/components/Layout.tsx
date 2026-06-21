@@ -2,6 +2,7 @@ import type { Locale } from "@tworiver/shared";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { LanguageToggle } from "./LanguageToggle";
+import { TwoRiverMark } from "./TwoRiverMark";
 
 interface LayoutProps {
   children: ReactNode;
@@ -31,7 +32,8 @@ export function Layout({
       <main className={isAdminRoute ? "site-main site-main--wide" : "site-main"}>
         <header className="site-header">
           <NavLink to="/" className="site-brand" aria-label="TwoRiver home">
-            TwoRiver
+            <TwoRiverMark />
+            <span>TwoRiver</span>
           </NavLink>
           <nav className="site-nav" aria-label="Primary navigation">
             <NavLink to="/" end>

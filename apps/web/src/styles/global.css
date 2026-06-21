@@ -99,8 +99,17 @@ a:hover {
 }
 
 .site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.two-river-mark {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
 }
 
 .site-nav {
