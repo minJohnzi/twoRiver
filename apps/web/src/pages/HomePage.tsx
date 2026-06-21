@@ -45,7 +45,7 @@ export function HomePage({ locale }: HomePageProps) {
 
       try {
         const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([
-          fetchPosts({ signal: controller.signal }),
+          fetchPosts({ init: { signal: controller.signal } }),
           fetchTags({ signal: controller.signal })
         ]);
 

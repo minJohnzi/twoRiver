@@ -25,6 +25,13 @@ export interface PostRecord {
   translations: PostTranslation[];
 }
 
+export interface PostPage {
+  posts: PostRecord[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 interface PostRow {
   id: number;
   uid: string;
@@ -137,6 +144,74 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
     tags: tagRows.map(mapTag),
     translations: translationRows.map(mapTranslation)
   };
+}
+
+function placeholders(values: unknown[]): string {
+  return values.map(() => "?").join(", ");
+}
+
+function groupRowsByPostId<TRow extends { post_id: number }>(rows: TRow[]): Map<number, TRow[]> {
+  const grouped = new Map<number, TRow[]>();
+  for (const row of rows) {
+    const existing = grouped.get(row.post_id) ?? [];
+    existing.push(row);
+    grouped.set(row.post_id, existing);
+  }
+  return grouped;
+}
+
+function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const postIds = rows.map((row) => row.id);
+  const postIdPlaceholders = placeholders(postIds);
+
+  const translationRows = db
+    .prepare(
+      `SELECT post_id, locale, title, summary, content_markdown, seo_title, seo_description
+       FROM post_translations
+       WHERE post_id IN (${postIdPlaceholders})
+       ORDER BY locale ASC`
+    )
+    .all(...postIds) as Array<TranslationRow & { post_id: number }>;
+
+  const tagRows = db
+    .prepare(
+      `SELECT pt.post_id, t.id, t.slug, t.name
+       FROM tags t
+       INNER JOIN post_tags pt ON pt.tag_id = t.id
+       WHERE pt.post_id IN (${postIdPlaceholders})
+       ORDER BY t.slug ASC`
+    )
+    .all(...postIds) as Array<TagRow & { post_id: number }>;
+
+  const categoryIds = Array.from(
+    new Set(rows.map((row) => row.category_id).filter((categoryId): categoryId is number => categoryId !== null))
+  );
+  const categoryRows =
+    categoryIds.length === 0
+      ? []
+      : (db
+          .prepare(`SELECT id, slug, name FROM categories WHERE id IN (${placeholders(categoryIds)})`)
+          .all(...categoryIds) as CategoryRow[]);
+  const categoriesById = new Map(categoryRows.map((row) => [row.id, mapCategory(row)]));
+  const translationsByPostId = groupRowsByPostId(translationRows);
+  const tagsByPostId = groupRowsByPostId(tagRows);
+
+  return rows.map((row) => ({
+    id: row.id,
+    uid: row.uid,
+    slug: row.slug,
+    status: row.status,
+    publishedAt: row.published_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    category: row.category_id === null ? null : (categoriesById.get(row.category_id) ?? null),
+    tags: (tagsByPostId.get(row.id) ?? []).map(mapTag),
+    translations: (translationsByPostId.get(row.id) ?? []).map(mapTranslation)
+  }));
 }
 
 function replacePostRelations(db: BlogDatabase, postId: number, input: UpsertPostInput, timestamp: string): void {
@@ -299,7 +374,30 @@ export function listPublicPosts(db: BlogDatabase): PostRecord[] {
     )
     .all() as PostRow[];
 
-  return rows.map((row) => hydratePost(db, row));
+  return hydratePosts(db, rows);
+}
+
+export function listPublicPostsPage(db: BlogDatabase, page: number, limit: number): PostPage {
+  const safePage = Math.max(1, Math.floor(page));
+  const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
+  const offset = (safePage - 1) * safeLimit;
+  const total = (db.prepare("SELECT COUNT(*) AS count FROM posts WHERE status = 'published'").get() as { count: number }).count;
+  const rows = db
+    .prepare(
+      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
+       FROM posts
+       WHERE status = 'published'
+       ORDER BY published_at DESC, created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(safeLimit, offset) as PostRow[];
+
+  return {
+    posts: hydratePosts(db, rows),
+    total,
+    page: safePage,
+    limit: safeLimit
+  };
 }
 
 export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): PostRecord[] {
@@ -313,7 +411,7 @@ export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): P
     )
     .all(slug) as PostRow[];
 
-  return rows.map((row) => hydratePost(db, row));
+  return hydratePosts(db, rows);
 }
 
 export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRecord[] {
@@ -328,7 +426,7 @@ export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRe
     )
     .all(slug) as PostRow[];
 
-  return rows.map((row) => hydratePost(db, row));
+  return hydratePosts(db, rows);
 }
 
 export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord | undefined {
@@ -352,7 +450,7 @@ export function listAdminPosts(db: BlogDatabase): PostRecord[] {
     )
     .all() as PostRow[];
 
-  return rows.map((row) => hydratePost(db, row));
+  return hydratePosts(db, rows);
 }
 
 export function getAdminPostById(db: BlogDatabase, id: number): PostRecord | undefined {

@@ -50,6 +50,20 @@ export const PublicPostSchema = PublicPostListItemSchema.extend({
 });
 export type PublicPost = z.infer<typeof PublicPostSchema>;
 
+export const PaginationSchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20)
+});
+export type Pagination = z.infer<typeof PaginationSchema>;
+
+export const PaginatedPostsResponseSchema = z.object({
+  posts: z.array(PublicPostListItemSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  limit: z.number().int().positive()
+});
+export type PaginatedPostsResponse = z.infer<typeof PaginatedPostsResponseSchema>;
+
 export const AboutProfileSchema = z.object({
   displayName: z.string().default(""),
   headline: z.string().default(""),

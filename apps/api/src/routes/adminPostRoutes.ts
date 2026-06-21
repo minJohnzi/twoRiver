@@ -14,6 +14,7 @@ import {
 import { AiClientNotConfiguredError, AiProviderError } from "../services/ai/aiClient.js";
 import { draftPostTranslation } from "../services/ai/translationDraftService.js";
 import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
+import { parseId } from "./parseId.js";
 
 interface IdParams {
   id: string;
@@ -32,11 +33,6 @@ const TranslateDraftInputSchema = z.object({
   }),
   targetLocale: z.enum(["zh", "en"])
 });
-
-function parseId(id: string): number | undefined {
-  const parsed = Number(id);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
 
 function sendPostError(error: unknown, reply: FastifyReply): boolean {
   if (error instanceof InvalidPostInputError) {

@@ -216,7 +216,7 @@ describe("public taxonomy routes", () => {
   });
 
   it("renders a dedicated 404 page for unknown routes", async () => {
-    mockedFetchPosts.mockResolvedValue({ posts: [] });
+    mockedFetchPosts.mockResolvedValue({ posts: [], total: 0, page: 1, limit: 20 });
     mockedFetchTags.mockResolvedValue({ tags: [] });
 
     render(

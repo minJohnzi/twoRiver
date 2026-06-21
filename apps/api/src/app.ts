@@ -13,6 +13,7 @@ import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { publicRoutes } from "./routes/publicRoutes.js";
+import { deleteExpiredSessions } from "./services/sessionService.js";
 import { MAX_IMAGE_BYTES } from "./services/uploads/imageUploadService.js";
 import { getUploadsRoot } from "./services/uploads/uploadPaths.js";
 
@@ -29,6 +30,7 @@ export interface BuildAppOptions {
 
 export function buildApp({ config, db }: BuildAppOptions) {
   const app = Fastify({ logger: config.NODE_ENV !== "test" });
+  let sessionCleanupTimer: NodeJS.Timeout | undefined;
   app.decorate("db", db);
   fs.mkdirSync(getUploadsRoot(config), { recursive: true });
 
@@ -63,7 +65,25 @@ export function buildApp({ config, db }: BuildAppOptions) {
     }
   });
 
+  app.addHook("onReady", async () => {
+    deleteExpiredSessions(db);
+    sessionCleanupTimer = setInterval(
+      () => {
+        try {
+          deleteExpiredSessions(db);
+        } catch (error) {
+          app.log.error({ error }, "Failed to clean expired sessions");
+        }
+      },
+      6 * 60 * 60 * 1000
+    );
+    sessionCleanupTimer.unref();
+  });
+
   app.addHook("onClose", async () => {
+    if (sessionCleanupTimer) {
+      clearInterval(sessionCleanupTimer);
+    }
     db.close();
   });
 

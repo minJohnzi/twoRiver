@@ -5,6 +5,7 @@ DEFAULT_PROJECT_DIR="/home/twoRiver"
 DEFAULT_API_SERVICE="tworiver-api"
 DEFAULT_NGINX_SITE="tworiver"
 DEFAULT_API_PORT="4000"
+DEFAULT_SERVICE_USER="tworiver"
 DEFAULT_ADMIN_USERNAME="admin"
 DEFAULT_DEEPSEEK_BASE_URL="https://api.deepseek.com"
 
@@ -16,6 +17,7 @@ ENABLE_HTTPS="no"
 API_SERVICE="$DEFAULT_API_SERVICE"
 NGINX_SITE="$DEFAULT_NGINX_SITE"
 API_PORT="$DEFAULT_API_PORT"
+SERVICE_USER="$DEFAULT_SERVICE_USER"
 ADMIN_USERNAME="$DEFAULT_ADMIN_USERNAME"
 ADMIN_PASSWORD=""
 SESSION_SECRET=""
@@ -166,6 +168,7 @@ collect_inputs() {
   prompt API_SERVICE "systemd API service name" "$DEFAULT_API_SERVICE"
   prompt NGINX_SITE "Nginx site name" "$DEFAULT_NGINX_SITE"
   prompt API_PORT "API port" "$DEFAULT_API_PORT"
+  prompt SERVICE_USER "system user for the API service" "$DEFAULT_SERVICE_USER"
   prompt ADMIN_USERNAME "Admin username" "$DEFAULT_ADMIN_USERNAME"
   prompt_secret ADMIN_PASSWORD "Admin password, at least 12 chars" 12
 
@@ -192,8 +195,18 @@ validate_inputs() {
   [[ -d "$PROJECT_DIR" ]] || fail "Project directory not found: $PROJECT_DIR"
   [[ -f "$PROJECT_DIR/package.json" ]] || fail "package.json not found in $PROJECT_DIR"
   [[ "$API_PORT" =~ ^[0-9]+$ ]] || fail "API port must be a number."
+  [[ "$SERVICE_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || fail "Service user must be a valid system user name."
   [[ ${#ADMIN_PASSWORD} -ge 12 ]] || fail "Admin password must contain at least 12 characters."
   [[ ${#SESSION_SECRET} -ge 32 ]] || fail "Session secret must contain at least 32 characters."
+}
+
+ensure_service_user() {
+  if id "$SERVICE_USER" >/dev/null 2>&1; then
+    return
+  fi
+
+  log "Creating system user $SERVICE_USER"
+  useradd --system --home "$PROJECT_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 }
 
 write_env_file() {
@@ -239,12 +252,19 @@ install_and_build() {
   "$PNPM_BIN" build
 
   load_env_file
+  ensure_service_user
+  mkdir -p "$PROJECT_DIR/apps/api/data"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR/apps/api/data"
 
   log "Running database migration"
-  "$PNPM_BIN" --filter @tworiver/api migrate
+  runuser -u "$SERVICE_USER" -- env DATABASE_PATH="$DATABASE_PATH" "$PNPM_BIN" --filter @tworiver/api migrate
 
   log "Seeding admin user"
-  "$PNPM_BIN" --filter @tworiver/api seed:admin
+  runuser -u "$SERVICE_USER" -- env \
+    DATABASE_PATH="$DATABASE_PATH" \
+    ADMIN_USERNAME="$ADMIN_USERNAME" \
+    ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+    "$PNPM_BIN" --filter @tworiver/api seed:admin
 }
 
 write_systemd_service() {
@@ -265,7 +285,10 @@ EnvironmentFile=$ENV_FILE
 ExecStart=$PNPM_BIN --filter @tworiver/api start
 Restart=always
 RestartSec=5
-User=root
+User=$SERVICE_USER
+Group=$SERVICE_USER
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -386,6 +409,7 @@ Deployment setup completed.
 Project:      $PROJECT_DIR
 Env file:     $ENV_FILE
 API service:  $API_SERVICE
+Service user: $SERVICE_USER
 Nginx site:   $NGINX_SITE
 Public URL:   $public_url
 
@@ -401,6 +425,9 @@ main() {
   require_command curl
   require_command nginx
   require_command systemctl
+  require_command useradd
+  require_command chown
+  require_command runuser
 
   collect_inputs
   validate_inputs

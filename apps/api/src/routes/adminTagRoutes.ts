@@ -1,16 +1,11 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
-import { listTags } from "../repositories/tagsRepository.js";
+import { getTagById, getTagBySlug, listTags } from "../repositories/tagsRepository.js";
 import { normalizeSlug } from "../services/slugService.js";
+import { parseId } from "./parseId.js";
 
 interface IdParams {
   id: string;
-}
-
-interface TagRow {
-  id: number;
-  slug: string;
-  name: string;
 }
 
 const CreateTagInputSchema = z.object({
@@ -22,29 +17,6 @@ const UpdateTagInputSchema = z.object({
   slug: z.string().min(1).optional(),
   name: z.string().min(1).optional()
 });
-
-function parseId(id: string): number | undefined {
-  const parsed = Number(id);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function mapTag(row: TagRow) {
-  return {
-    id: row.id,
-    slug: row.slug,
-    name: row.name
-  };
-}
-
-function getTagById(app: FastifyInstance, id: number) {
-  const row = app.db.prepare("SELECT id, slug, name FROM tags WHERE id = ?").get(id) as TagRow | undefined;
-  return row ? mapTag(row) : undefined;
-}
-
-function getTagBySlug(app: FastifyInstance, slug: string) {
-  const row = app.db.prepare("SELECT id, slug, name FROM tags WHERE slug = ?").get(slug) as TagRow | undefined;
-  return row ? mapTag(row) : undefined;
-}
 
 export async function adminTagRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
@@ -66,7 +38,7 @@ export async function adminTagRoutes(app: FastifyInstance) {
       reply.code(400).send({ message: "Invalid tag input" });
       return;
     }
-    if (getTagBySlug(app, slug)) {
+    if (getTagBySlug(app.db, slug)) {
       reply.code(409).send({ message: "Tag already exists" });
       return;
     }
@@ -80,11 +52,9 @@ export async function adminTagRoutes(app: FastifyInstance) {
       )
       .run(slug, name, now);
 
-    const row = app.db.prepare("SELECT id, slug, name FROM tags WHERE slug = ?").get(slug) as TagRow;
+    const tag = getTagBySlug(app.db, slug);
     reply.code(201);
-    return {
-      tag: mapTag(row)
-    };
+    return { tag };
   });
 
   app.put<{ Params: IdParams }>("/api/admin/tags/:id", async (request, reply) => {
@@ -99,7 +69,7 @@ export async function adminTagRoutes(app: FastifyInstance) {
       return;
     }
 
-    const existing = getTagById(app, id);
+    const existing = getTagById(app.db, id);
     if (!existing) {
       reply.code(404).send({ message: "Tag not found" });
       return;
@@ -110,7 +80,7 @@ export async function adminTagRoutes(app: FastifyInstance) {
       reply.code(400).send({ message: "Invalid tag input" });
       return;
     }
-    const conflictingTag = getTagBySlug(app, slug);
+    const conflictingTag = getTagBySlug(app.db, slug);
     if (conflictingTag && conflictingTag.id !== id) {
       reply.code(409).send({ message: "Tag already exists" });
       return;
@@ -120,7 +90,7 @@ export async function adminTagRoutes(app: FastifyInstance) {
     const now = new Date().toISOString();
     app.db.prepare("UPDATE tags SET slug = ?, name = ?, updated_at = ? WHERE id = ?").run(slug, name, now, id);
 
-    const tag = getTagById(app, id);
+    const tag = getTagById(app.db, id);
     if (!tag) {
       reply.code(404).send({ message: "Tag not found" });
       return;

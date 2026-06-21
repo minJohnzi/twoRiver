@@ -1,8 +1,23 @@
-import type { AboutProfile, Category, PublicPost, PublicPostListItem, Tag } from "@tworiver/shared";
+import type { AboutProfile, Category, PaginatedPostsResponse, PublicPost, PublicPostListItem, Tag } from "@tworiver/shared";
 import { apiRequest } from "./client";
 
-export function fetchPosts(init?: RequestInit) {
-  return apiRequest<{ posts: PublicPostListItem[] }>("/api/posts", init);
+interface FetchPostsOptions {
+  page?: number;
+  limit?: number;
+  init?: RequestInit;
+}
+
+export function fetchPosts(options: FetchPostsOptions = {}) {
+  const params = new URLSearchParams();
+  if (options.page !== undefined) {
+    params.set("page", String(options.page));
+  }
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+
+  const query = params.toString();
+  return apiRequest<PaginatedPostsResponse>(`/api/posts${query ? `?${query}` : ""}`, options.init);
 }
 
 export function fetchPost(slug: string, init?: RequestInit) {

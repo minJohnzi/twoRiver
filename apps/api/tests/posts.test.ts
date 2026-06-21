@@ -326,7 +326,7 @@ describe("post routes", () => {
       });
 
       expect(listResponse.statusCode).toBe(200);
-      expect(listResponse.json()).toEqual({ posts: [] });
+      expect(listResponse.json()).toEqual({ posts: [], total: 0, page: 1, limit: 20 });
     } finally {
       await app.close();
     }
@@ -640,7 +640,7 @@ describe("post routes", () => {
 
       const publicListResponse = await app.inject({ method: "GET", url: "/api/posts" });
       expect(publicListResponse.statusCode).toBe(200);
-      expect(publicListResponse.json()).toEqual({ posts: [] });
+      expect(publicListResponse.json()).toEqual({ posts: [], total: 0, page: 1, limit: 20 });
 
       const republishResponse = await app.inject({
         method: "PUT",
@@ -662,6 +662,46 @@ describe("post routes", () => {
       const visibleDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-hidden" });
       expect(visibleDetailResponse.statusCode).toBe(200);
       expect(visibleDetailResponse.json().post.publishedAt).toBe(publishedAt);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("paginates public post lists with stable metadata", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      for (const index of [1, 2, 3]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie, "x-csrf-token": csrfToken },
+          payload: {
+            slug: `published-page-${index}`,
+            status: "published",
+            publishedAt: new Date(`2026-04-0${index}T00:00:00.000Z`).toISOString(),
+            tagSlugs: [],
+            translations: [{ locale: "en", title: `Published ${index}`, summary: "", contentMarkdown: "" }]
+          }
+        });
+        expect(response.statusCode).toBe(201);
+      }
+
+      const pageResponse = await app.inject({
+        method: "GET",
+        url: "/api/posts?page=2&limit=2"
+      });
+
+      expect(pageResponse.statusCode).toBe(200);
+      expect(pageResponse.json()).toEqual(
+        expect.objectContaining({
+          total: 3,
+          page: 2,
+          limit: 2
+        })
+      );
+      expect(pageResponse.json().posts.map((post: { slug: string }) => post.slug)).toEqual(["published-page-1"]);
     } finally {
       await app.close();
     }

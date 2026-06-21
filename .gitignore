@@ -12,6 +12,7 @@ apps/web/.vite/
 
 # Local agent/tool state
 .codex/
+.quality_gate/
 .superpowers/
 docs/superpowers/
 

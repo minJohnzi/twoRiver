@@ -217,4 +217,42 @@ describe("auth routes", () => {
       await app.close();
     }
   });
+
+  test("rate limits repeated login failures from the same client", async () => {
+    const databasePath = createDatabasePath();
+    migrate(databasePath);
+    const db = openDatabase(databasePath);
+    await seedAdmin(db, "admin", "secret1234567");
+
+    const app = buildApp({ config: makeConfig(databasePath), db });
+
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/auth/login",
+          payload: {
+            username: "admin",
+            password: "wrong-password"
+          }
+        });
+        expect(response.statusCode).toBe(401);
+      }
+
+      const limitedResponse = await app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: {
+          username: "admin",
+          password: "wrong-password"
+        }
+      });
+
+      expect(limitedResponse.statusCode).toBe(429);
+      expect(limitedResponse.headers["retry-after"]).toBeDefined();
+      expect(limitedResponse.json()).toEqual({ message: "Too many login attempts. Try again later." });
+    } finally {
+      await app.close();
+    }
+  });
 });

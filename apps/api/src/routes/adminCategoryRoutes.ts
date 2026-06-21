@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { getCategoryById, getCategoryBySlug, listCategories } from "../repositories/categoriesRepository.js";
 import { normalizeSlug } from "../services/slugService.js";
+import { parseId } from "./parseId.js";
 
 interface IdParams {
   id: string;
@@ -16,11 +17,6 @@ const UpdateCategoryInputSchema = z.object({
   slug: z.string().min(1).optional(),
   name: z.string().min(1).optional()
 });
-
-function parseId(id: string): number | undefined {
-  const parsed = Number(id);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
 
 export async function adminCategoryRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);

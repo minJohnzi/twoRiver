@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchPost } from "./posts";
+import { fetchPost, fetchPosts } from "./posts";
 
 describe("public posts API", () => {
   afterEach(() => {
@@ -19,5 +19,20 @@ describe("public posts API", () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.signal).toBe(controller.signal);
+  });
+
+  it("serializes optional public post pagination parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ posts: [], total: 0, page: 2, limit: 5 }), {
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchPosts({ page: 2, limit: 5 });
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe("/api/posts");
+    expect(new URL(url).search).toBe("?page=2&limit=5");
   });
 });

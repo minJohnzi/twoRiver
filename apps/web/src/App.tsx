@@ -57,6 +57,10 @@ function getInitialTheme(): Theme {
   return savedTheme === "light" || savedTheme === "dark" ? savedTheme : DEFAULT_THEME;
 }
 
+function getHtmlLang(locale: Locale): string {
+  return locale === "zh" ? "zh-Hans" : "en";
+}
+
 interface RequireAdminProps {
   children: ReactNode;
   authStatus: AdminAuthStatus;
@@ -99,6 +103,10 @@ export function App() {
   const adminAuthRequestRef = useRef<Promise<void> | null>(null);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    document.documentElement.lang = getHtmlLang(locale);
+  }, [locale]);
+
   const verifyAdminSession = useCallback(() => {
     if (adminAuthRequestRef.current) {
       return adminAuthRequestRef.current;
@@ -125,6 +133,7 @@ export function App() {
   function handleLocaleChange(nextLocale: Locale) {
     setLocale(nextLocale);
     window.localStorage.setItem("tworiver_locale", nextLocale);
+    document.documentElement.lang = getHtmlLang(nextLocale);
   }
 
   function handleThemeChange(nextTheme: Theme) {

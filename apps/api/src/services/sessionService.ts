@@ -73,3 +73,8 @@ export function getSessionUser(db: BlogDatabase, sessionId: string): SessionUser
 export function deleteSession(db: BlogDatabase, sessionId: string): void {
   db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
 }
+
+export function deleteExpiredSessions(db: BlogDatabase): number {
+  const result = db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(new Date().toISOString());
+  return result.changes;
+}

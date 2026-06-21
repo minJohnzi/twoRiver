@@ -1,10 +1,11 @@
+import { PaginationSchema } from "@tworiver/shared";
 import type { FastifyInstance } from "fastify";
 import { getCategoryBySlug, listCategories } from "../repositories/categoriesRepository.js";
 import { normalizeSlug } from "../services/slugService.js";
 import { getTagBySlug, listTags } from "../repositories/tagsRepository.js";
 import {
   getPublicPostBySlug,
-  listPublicPosts,
+  listPublicPostsPage,
   listPublicPostsByCategorySlug,
   listPublicPostsByTagSlug
 } from "../repositories/postsRepository.js";
@@ -14,9 +15,15 @@ interface SlugParams {
 }
 
 export async function publicRoutes(app: FastifyInstance) {
-  app.get("/api/posts", async () => ({
-    posts: listPublicPosts(app.db)
-  }));
+  app.get("/api/posts", async (request, reply) => {
+    const parsed = PaginationSchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.code(400).send({ message: "Invalid pagination input" });
+      return;
+    }
+
+    return listPublicPostsPage(app.db, parsed.data.page, parsed.data.limit);
+  });
 
   app.get<{ Params: SlugParams }>("/api/posts/:slug", async (request, reply) => {
     const post = getPublicPostBySlug(app.db, normalizeSlug(request.params.slug));

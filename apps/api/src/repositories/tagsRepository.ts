@@ -26,6 +26,11 @@ export function getTagBySlug(db: BlogDatabase, slug: string): Tag | undefined {
   return row ? mapTag(row) : undefined;
 }
 
+export function getTagById(db: BlogDatabase, id: number): Tag | undefined {
+  const row = db.prepare("SELECT id, slug, name FROM tags WHERE id = ?").get(id) as TagRow | undefined;
+  return row ? mapTag(row) : undefined;
+}
+
 export function ensureTags(db: BlogDatabase, tagSlugs: string[]): Tag[] {
   const tagsBySlug = new Map<string, string>();
   for (const tagSlug of tagSlugs) {
