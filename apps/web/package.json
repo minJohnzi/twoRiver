@@ -12,6 +12,8 @@
     "lint": "pnpm --filter @tworiver/shared build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@fontsource-variable/noto-serif-sc": "^5.2.10",
+    "@fontsource-variable/playfair-display": "^5.2.8",
     "@iconify/react": "^5.2.1",
     "@tworiver/shared": "workspace:*",
     "dompurify": "^3.4.8",

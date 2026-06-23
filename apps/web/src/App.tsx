@@ -14,6 +14,8 @@ import { Layout } from "./components/Layout";
 import { fetchCurrentUser, logout, type CurrentUser } from "./api/auth";
 
 const DEFAULT_LOCALE: Locale = "zh";
+const PUBLIC_LOCALE_STORAGE_KEY = "tworiver_locale";
+const ADMIN_LOCALE_STORAGE_KEY = "tworiver_admin_locale";
 type Theme = "dark" | "light";
 const DEFAULT_THEME: Theme = "dark";
 type AdminAuthStatus = "unknown" | "checking" | "allowed" | "denied";
@@ -39,12 +41,12 @@ const AdminTaxonomyPage = lazyNamed<{ kind: "categories" | "tags"; locale: Local
   "AdminTaxonomyPage"
 );
 
-function getInitialLocale(): Locale {
+function getInitialLocale(storageKey: string): Locale {
   if (typeof window === "undefined") {
     return DEFAULT_LOCALE;
   }
 
-  const savedLocale = window.localStorage.getItem("tworiver_locale");
+  const savedLocale = window.localStorage.getItem(storageKey);
   return savedLocale === "en" || savedLocale === "zh" ? savedLocale : DEFAULT_LOCALE;
 }
 
@@ -96,12 +98,16 @@ function RequireAdmin({ children, authStatus, verifyAdminSession }: RequireAdmin
 }
 
 export function App() {
-  const [locale, setLocale] = useState<Locale>(getInitialLocale);
+  const [publicLocale, setPublicLocale] = useState<Locale>(() => getInitialLocale(PUBLIC_LOCALE_STORAGE_KEY));
+  const [adminLocale, setAdminLocale] = useState<Locale>(() => getInitialLocale(ADMIN_LOCALE_STORAGE_KEY));
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [adminUser, setAdminUser] = useState<CurrentUser | null>(null);
   const [adminAuthStatus, setAdminAuthStatus] = useState<AdminAuthStatus>("unknown");
   const adminAuthRequestRef = useRef<Promise<void> | null>(null);
+  const location = useLocation();
   const navigate = useNavigate();
+  const isAdminRoute = location.pathname.startsWith("/admin");
+  const locale = isAdminRoute ? adminLocale : publicLocale;
 
   useEffect(() => {
     document.documentElement.lang = getHtmlLang(locale);
@@ -130,10 +136,14 @@ export function App() {
     return request;
   }, []);
 
-  function handleLocaleChange(nextLocale: Locale) {
-    setLocale(nextLocale);
-    window.localStorage.setItem("tworiver_locale", nextLocale);
-    document.documentElement.lang = getHtmlLang(nextLocale);
+  function handlePublicLocaleChange(nextLocale: Locale) {
+    setPublicLocale(nextLocale);
+    window.localStorage.setItem(PUBLIC_LOCALE_STORAGE_KEY, nextLocale);
+  }
+
+  function handleAdminLocaleChange(nextLocale: Locale) {
+    setAdminLocale(nextLocale);
+    window.localStorage.setItem(ADMIN_LOCALE_STORAGE_KEY, nextLocale);
   }
 
   function handleThemeChange(nextTheme: Theme) {
@@ -162,25 +172,25 @@ export function App() {
       theme={theme}
       isAdminAuthenticated={adminUser !== null}
       onLogout={() => void handleLogout()}
-      onLocaleChange={handleLocaleChange}
+      onLocaleChange={isAdminRoute ? handleAdminLocaleChange : handlePublicLocaleChange}
       onThemeChange={handleThemeChange}
     >
       <Suspense fallback={<LoadingSection />}>
         <Routes>
-          <Route path="/" element={<HomePage locale={locale} />} />
-          <Route path="/posts/:slug" element={<PostPage locale={locale} />} />
-          <Route path="/categories" element={<CategoryListPage locale={locale} />} />
-          <Route path="/categories/:slug" element={<CategoryDetailPage locale={locale} />} />
-          <Route path="/tags" element={<TagListPage locale={locale} />} />
-          <Route path="/tags/:slug" element={<TagDetailPage locale={locale} />} />
-          <Route path="/about" element={<AboutPage locale={locale} />} />
-          <Route path="/admin/login" element={<LoginPage locale={locale} />} />
-          <Route path="/admin/about" element={requireAdmin(<AdminAboutPage locale={locale} />)} />
-          <Route path="/admin/posts" element={requireAdmin(<AdminPostsPage locale={locale} />)} />
-          <Route path="/admin/posts/new" element={requireAdmin(<AdminEditorPage locale={locale} />)} />
-          <Route path="/admin/posts/:id" element={requireAdmin(<AdminEditorPage locale={locale} />)} />
-          <Route path="/admin/categories" element={requireAdmin(<AdminTaxonomyPage kind="categories" locale={locale} />)} />
-          <Route path="/admin/tags" element={requireAdmin(<AdminTaxonomyPage kind="tags" locale={locale} />)} />
+          <Route path="/" element={<HomePage locale={publicLocale} />} />
+          <Route path="/posts/:slug" element={<PostPage locale={publicLocale} />} />
+          <Route path="/categories" element={<CategoryListPage locale={publicLocale} />} />
+          <Route path="/categories/:slug" element={<CategoryDetailPage locale={publicLocale} />} />
+          <Route path="/tags" element={<TagListPage locale={publicLocale} />} />
+          <Route path="/tags/:slug" element={<TagDetailPage locale={publicLocale} />} />
+          <Route path="/about" element={<AboutPage locale={publicLocale} />} />
+          <Route path="/admin/login" element={<LoginPage locale={adminLocale} />} />
+          <Route path="/admin/about" element={requireAdmin(<AdminAboutPage locale={adminLocale} />)} />
+          <Route path="/admin/posts" element={requireAdmin(<AdminPostsPage locale={adminLocale} />)} />
+          <Route path="/admin/posts/new" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
+          <Route path="/admin/posts/:id" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
+          <Route path="/admin/categories" element={requireAdmin(<AdminTaxonomyPage kind="categories" locale={adminLocale} />)} />
+          <Route path="/admin/tags" element={requireAdmin(<AdminTaxonomyPage kind="tags" locale={adminLocale} />)} />
           <Route path="*" element={<NotFoundPage locale={locale} />} />
         </Routes>
       </Suspense>

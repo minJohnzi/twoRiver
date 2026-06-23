@@ -82,7 +82,7 @@ describe("admin route protection", () => {
   });
 
   it("starts the admin login form with an empty username", async () => {
-    window.localStorage.setItem("tworiver_locale", "en");
+    window.localStorage.setItem("tworiver_admin_locale", "en");
 
     render(
       <MemoryRouter initialEntries={["/admin/login"]}>
@@ -91,6 +91,57 @@ describe("admin route protection", () => {
     );
 
     expect(await screen.findByLabelText("Username")).toHaveValue("");
+  });
+
+  it("reads public and admin language preferences independently", async () => {
+    window.localStorage.setItem("tworiver_locale", "en");
+    window.localStorage.setItem("tworiver_admin_locale", "zh");
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/admin/login"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "Switch to English" })).toBeInTheDocument();
+
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "Switch to Chinese" })).toBeInTheDocument();
+  });
+
+  it("persists public and admin language changes independently", async () => {
+    window.localStorage.setItem("tworiver_locale", "zh");
+    window.localStorage.setItem("tworiver_admin_locale", "zh");
+
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/admin/login"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch to English" }));
+    expect(window.localStorage.getItem("tworiver_admin_locale")).toBe("en");
+    expect(window.localStorage.getItem("tworiver_locale")).toBe("zh");
+
+    unmount();
+    window.localStorage.setItem("tworiver_locale", "en");
+
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch to Chinese" }));
+    expect(window.localStorage.getItem("tworiver_locale")).toBe("zh");
+    expect(window.localStorage.getItem("tworiver_admin_locale")).toBe("en");
   });
 
   it("shows a logout entry for authenticated admins and clears the session", async () => {

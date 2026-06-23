@@ -1,0 +1,5 @@
+:root {
+  --font-serif: "Playfair Display Variable", "Noto Serif SC Variable", serif;
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+}
