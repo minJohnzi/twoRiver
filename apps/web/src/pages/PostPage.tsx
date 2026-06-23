@@ -124,7 +124,7 @@ export function PostPage({ locale }: PostPageProps) {
         {locale === "zh" ? "返回文章列表" : "Back to posts"}
       </Link>
       <header className="article-header">
-        <div className="post-meta">
+        <div className="post-meta article-header__meta">
           {publishedDate ? <time dateTime={post.publishedAt ?? undefined}>{publishedDate}</time> : null}
           {post.category ? <span>{post.category.name}</span> : null}
           {post.tags.length > 0 ? (

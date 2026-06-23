@@ -1,79 +1,69 @@
-import type { Category, Locale, PostTranslation, PublicPostListItem, Tag } from "@tworiver/shared";
+import type { Category, Locale, PublicPostListItem, Tag } from "@tworiver/shared";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCategories, fetchCategoryDetail, fetchTagDetail, fetchTags } from "../api/posts";
+import { PublicPostList } from "../components/PublicPostList";
 
 interface LocaleProps {
   locale: Locale;
 }
 
-function findTranslation(translations: PostTranslation[], locale: Locale): PostTranslation | undefined {
-  return (
-    translations.find((translation) => translation.locale === locale) ??
-    translations.find((translation) => translation.locale === "zh") ??
-    translations[0]
-  );
-}
-
 function PostLinks({ locale, posts }: { locale: Locale; posts: PublicPostListItem[] }) {
-  if (posts.length === 0) {
-    return <p className="muted">{locale === "zh" ? "暂无已发布文章。" : "No published posts yet."}</p>;
-  }
-
-  return (
-    <div className="post-list">
-      {posts.map((post) => {
-        const translation = findTranslation(post.translations, locale);
-        return (
-          <article className="post-list__item" key={post.id}>
-            <div className="post-row-meta">
-              {post.category ? <span>{post.category.name}</span> : null}
-              {post.tags.length > 0 ? <span>{post.tags.map((tag) => tag.name).join(", ")}</span> : null}
-            </div>
-            <h3>
-              <Link to={`/posts/${post.slug}`}>{translation?.title ?? post.slug}</Link>
-            </h3>
-            {translation?.summary ? <p>{translation.summary}</p> : null}
-          </article>
-        );
-      })}
-    </div>
-  );
+  return <PublicPostList locale={locale} posts={posts} emptyMessage={locale === "zh" ? "暂无已发布文章。" : "No published posts yet."} />;
 }
 
 function TaxonomyList<TItem extends Category | Tag>({
   title,
   items,
-  basePath
+  basePath,
+  isLoading,
+  locale
 }: {
   title: string;
   items: TItem[];
   basePath: string;
+  isLoading: boolean;
+  locale: Locale;
 }) {
+  const countLabel = locale === "zh" ? `${items.length} 个条目` : `${items.length} ${items.length === 1 ? "entry" : "entries"}`;
+
   return (
     <section className="page-section">
       <header className="page-heading">
         <h1>{title}</h1>
+        <p aria-live="polite">{isLoading ? (locale === "zh" ? "正在读取..." : "Loading...") : countLabel}</p>
       </header>
-      <div className="taxonomy-grid">
-        {items.map((item) => (
-          <Link aria-label={item.name} className="taxonomy-card" key={item.id} to={`/${basePath}/${item.slug}`}>
-            <strong>{item.name}</strong>
-            <span>{item.slug}</span>
-          </Link>
-        ))}
-      </div>
+      {isLoading ? <TaxonomySkeleton /> : null}
+      {!isLoading && items.length === 0 ? (
+        <div className="empty-state">
+          <strong>{locale === "zh" ? "暂无条目。" : "No entries yet."}</strong>
+          <p>{locale === "zh" ? "发布内容并添加分类或标签后会显示在这里。" : "Categories and tags appear here after posts use them."}</p>
+        </div>
+      ) : null}
+      {!isLoading && items.length > 0 ? (
+        <div className="taxonomy-grid">
+          {items.map((item) => (
+            <Link aria-label={item.name} className="taxonomy-card" key={item.id} to={`/${basePath}/${item.slug}`}>
+              <strong>{item.name}</strong>
+              <span>{item.slug}</span>
+            </Link>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
 
-export function CategoryListPage({ locale: _locale }: LocaleProps) {
+export function CategoryListPage({ locale }: LocaleProps) {
   const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
     fetchCategories({ signal: controller.signal })
       .then(({ categories: nextCategories }) => {
         if (isMounted) {
@@ -84,6 +74,11 @@ export function CategoryListPage({ locale: _locale }: LocaleProps) {
         if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load categories");
         }
+      })
+      .finally(() => {
+        if (isMounted && !controller.signal.aborted) {
+          setIsLoading(false);
+        }
       });
     return () => {
       isMounted = false;
@@ -95,16 +90,19 @@ export function CategoryListPage({ locale: _locale }: LocaleProps) {
     return <p className="error-text">{error}</p>;
   }
 
-  return <TaxonomyList title="Categories" items={categories} basePath="categories" />;
+  return <TaxonomyList title="Categories" items={categories} basePath="categories" isLoading={isLoading} locale={locale} />;
 }
 
-export function TagListPage({ locale: _locale }: LocaleProps) {
+export function TagListPage({ locale }: LocaleProps) {
   const [tags, setTags] = useState<Tag[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
     fetchTags({ signal: controller.signal })
       .then(({ tags: nextTags }) => {
         if (isMounted) {
@@ -115,6 +113,11 @@ export function TagListPage({ locale: _locale }: LocaleProps) {
         if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tags");
         }
+      })
+      .finally(() => {
+        if (isMounted && !controller.signal.aborted) {
+          setIsLoading(false);
+        }
       });
     return () => {
       isMounted = false;
@@ -126,18 +129,21 @@ export function TagListPage({ locale: _locale }: LocaleProps) {
     return <p className="error-text">{error}</p>;
   }
 
-  return <TaxonomyList title="Tags" items={tags} basePath="tags" />;
+  return <TaxonomyList title="Tags" items={tags} basePath="tags" isLoading={isLoading} locale={locale} />;
 }
 
 export function CategoryDetailPage({ locale }: LocaleProps) {
   const { slug = "" } = useParams();
   const [category, setCategory] = useState<Category | null>(null);
   const [posts, setPosts] = useState<PublicPostListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
     fetchCategoryDetail(slug, { signal: controller.signal })
       .then((response) => {
         if (isMounted) {
@@ -148,6 +154,11 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
       .catch((caught: unknown) => {
         if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load category");
+        }
+      })
+      .finally(() => {
+        if (isMounted && !controller.signal.aborted) {
+          setIsLoading(false);
         }
       });
     return () => {
@@ -167,8 +178,9 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
           {locale === "zh" ? "返回分类" : "Back to categories"}
         </Link>
         <h1>{category?.name ?? slug}</h1>
+        <p aria-live="polite">{isLoading ? (locale === "zh" ? "正在读取..." : "Loading...") : locale === "zh" ? `${posts.length} 篇记录` : `${posts.length} ${posts.length === 1 ? "note" : "notes"}`}</p>
       </header>
-      <PostLinks locale={locale} posts={posts} />
+      {isLoading ? <PostListSkeleton /> : <PostLinks locale={locale} posts={posts} />}
     </section>
   );
 }
@@ -177,11 +189,14 @@ export function TagDetailPage({ locale }: LocaleProps) {
   const { slug = "" } = useParams();
   const [tag, setTag] = useState<Tag | null>(null);
   const [posts, setPosts] = useState<PublicPostListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
     fetchTagDetail(slug, { signal: controller.signal })
       .then((response) => {
         if (isMounted) {
@@ -192,6 +207,11 @@ export function TagDetailPage({ locale }: LocaleProps) {
       .catch((caught: unknown) => {
         if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tag");
+        }
+      })
+      .finally(() => {
+        if (isMounted && !controller.signal.aborted) {
+          setIsLoading(false);
         }
       });
     return () => {
@@ -211,8 +231,29 @@ export function TagDetailPage({ locale }: LocaleProps) {
           {locale === "zh" ? "返回标签" : "Back to tags"}
         </Link>
         <h1>{tag?.name ?? slug}</h1>
+        <p aria-live="polite">{isLoading ? (locale === "zh" ? "正在读取..." : "Loading...") : locale === "zh" ? `${posts.length} 篇记录` : `${posts.length} ${posts.length === 1 ? "note" : "notes"}`}</p>
       </header>
-      <PostLinks locale={locale} posts={posts} />
+      {isLoading ? <PostListSkeleton /> : <PostLinks locale={locale} posts={posts} />}
     </section>
+  );
+}
+
+function TaxonomySkeleton() {
+  return (
+    <div className="taxonomy-grid taxonomy-grid--loading" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
+function PostListSkeleton() {
+  return (
+    <div className="post-list-skeleton" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { Locale } from "@tworiver/shared";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { AdminShell } from "./AdminShell";
 import { LanguageToggle } from "./LanguageToggle";
 import { TwoRiverMark } from "./TwoRiverMark";
 
@@ -25,7 +26,25 @@ export function Layout({
 }: LayoutProps) {
   const { pathname } = useLocation();
   const isAdminRoute = pathname.startsWith("/admin");
+  const isAdminWorkspace = isAdminRoute && pathname !== "/admin/login";
   const nextTheme = theme === "dark" ? "light" : "dark";
+
+  if (isAdminWorkspace) {
+    return (
+      <div className="app-shell" data-theme={theme}>
+        <AdminShell
+          locale={locale}
+          theme={theme}
+          isAuthenticated={isAdminAuthenticated}
+          onLocaleChange={onLocaleChange}
+          onThemeChange={onThemeChange}
+          onLogout={onLogout}
+        >
+          {children}
+        </AdminShell>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell" data-theme={theme}>
@@ -49,11 +68,6 @@ export function Layout({
               {theme === "dark" ? "light" : "dark"}
             </button>
             <LanguageToggle locale={locale} onLocaleChange={onLocaleChange} />
-            {isAdminRoute && isAdminAuthenticated ? (
-              <button type="button" className="theme-toggle" onClick={onLogout}>
-                Logout
-              </button>
-            ) : null}
           </nav>
         </header>
         {children}

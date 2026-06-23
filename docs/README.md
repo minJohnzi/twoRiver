@@ -7,6 +7,7 @@
 - [Ubuntu 部署指南](deployment/ubuntu.md)：阿里云 Ubuntu ECS、GoDaddy DNS、Nginx、systemd、HTTPS、首次部署和增量更新流程。
 - [日常运维手册](operations.md)：生产环境巡检、备份、恢复、发布、排障和安全注意事项。
 - [项目测试清单](checklist.md)：公开页面、后台流程、API 行为、安全和性能的人工 QA 清单。
+- [Tiptap 文档与笔记引擎方案](tiptap-document-engine.md)：从 Markdown 编辑器演进到 Tiptap/ProseMirror JSON 文档模型的架构、迁移和测试方案。
 
 ## 文档维护规则
 

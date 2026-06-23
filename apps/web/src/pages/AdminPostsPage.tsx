@@ -71,9 +71,11 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
   const [posts, setPosts] = useState<PublicPost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -105,7 +107,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
       isMounted = false;
       controller.abort();
     };
-  }, []);
+  }, [reloadKey]);
 
   const categories = useMemo(() => collectCategories(posts), [posts]);
   const tags = useMemo(() => collectTags(posts), [posts]);
@@ -113,6 +115,21 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
   const filteredPosts = useMemo(
     () =>
       posts.filter((post) => {
+        const normalizedQuery = query.trim().toLocaleLowerCase();
+        if (normalizedQuery) {
+          const searchableText = [
+            post.slug,
+            ...post.translations.map((translation) => translation.title),
+            post.category?.name,
+            ...post.tags.map((tag) => tag.name)
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLocaleLowerCase();
+          if (!searchableText.includes(normalizedQuery)) {
+            return false;
+          }
+        }
         if (statusFilter !== "all" && post.status !== statusFilter) {
           return false;
         }
@@ -124,7 +141,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
         }
         return true;
       }),
-    [categoryFilter, posts, statusFilter, tagFilter]
+    [categoryFilter, posts, query, statusFilter, tagFilter]
   );
 
   const statusCounts = useMemo(
@@ -139,11 +156,19 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
     [posts]
   );
 
+  const hasActiveFilters = query.trim() !== "" || statusFilter !== "all" || categoryFilter !== "all" || tagFilter !== "all";
+
+  function clearFilters() {
+    setQuery("");
+    setStatusFilter("all");
+    setCategoryFilter("all");
+    setTagFilter("all");
+  }
+
   return (
     <section className="admin-workspace">
-      <div className="admin-hero">
-        <div>
-          <p className="admin-kicker">Private console</p>
+      <header className="admin-page-header">
+        <div className="admin-page-title">
           <h1>{locale === "zh" ? "发布控制台" : "Publishing console"}</h1>
           <p>
             {locale === "zh"
@@ -151,42 +176,43 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
               : "Filter by status, category, and tags to find the posts that need attention."}
           </p>
         </div>
-        <div className="admin-hero__actions">
+        <div className="admin-page-actions">
           <Link className="primary-button" to="/admin/posts/new">
+            <span aria-hidden="true">+</span>
             {locale === "zh" ? "新建文章" : "New post"}
           </Link>
-          <Link className="secondary-button" to="/admin/categories">
-            {locale === "zh" ? "分类管理" : "Categories"}
-          </Link>
-          <Link className="secondary-button" to="/admin/tags">
-            {locale === "zh" ? "标签管理" : "Tags"}
-          </Link>
-          <Link className="secondary-button" to="/admin/about">
-            {locale === "zh" ? "关于页" : "About"}
-          </Link>
         </div>
-      </div>
+      </header>
 
       <div className="admin-metrics" aria-label="Post metrics">
-        <div>
+        <div className="admin-metric">
           <span>{locale === "zh" ? "总数" : "Total"}</span>
           <strong>{posts.length}</strong>
         </div>
-        <div>
+        <div className="admin-metric admin-metric--published">
           <span>{locale === "zh" ? "已发布" : "Published"}</span>
           <strong>{statusCounts.published}</strong>
         </div>
-        <div>
+        <div className="admin-metric admin-metric--draft">
           <span>{locale === "zh" ? "草稿" : "Drafts"}</span>
           <strong>{statusCounts.draft}</strong>
         </div>
-        <div>
+        <div className="admin-metric admin-metric--hidden">
           <span>{locale === "zh" ? "隐藏/下架" : "Hidden"}</span>
           <strong>{statusCounts.hidden}</strong>
         </div>
       </div>
 
       <div className="admin-filters" aria-label={locale === "zh" ? "文章筛选" : "Post filters"}>
+        <label className="admin-search-field">
+          <span>{locale === "zh" ? "搜索" : "Search"}</span>
+          <input
+            type="search"
+            value={query}
+            placeholder={locale === "zh" ? "搜索标题、slug、分类或标签" : "Search title, slug, category, or tag"}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
         <label>
           <span>{locale === "zh" ? "状态" : "Status"}</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
@@ -218,11 +244,10 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
             ))}
           </select>
         </label>
+        <button className="secondary-button admin-filter-clear" type="button" disabled={!hasActiveFilters} onClick={clearFilters}>
+          {locale === "zh" ? "清除筛选" : "Clear"}
+        </button>
       </div>
-
-      {isLoading ? <p className="muted">Loading...</p> : null}
-      {error ? <p className="error-text">{error}</p> : null}
-      {!isLoading && !error && posts.length === 0 ? <p className="muted">{locale === "zh" ? "暂无文章。" : "No posts yet."}</p> : null}
 
       <div className="admin-board__main">
         <div className="admin-section-head">
@@ -234,29 +259,65 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
           </span>
         </div>
         <div className="admin-table" aria-label="Admin posts">
-          {filteredPosts.map((post) => {
+          <div className="admin-table__head" aria-hidden="true">
+            <span>{locale === "zh" ? "文章" : "Post"}</span>
+            <span>{locale === "zh" ? "状态" : "Status"}</span>
+            <span>{locale === "zh" ? "语言" : "Locales"}</span>
+            <span>{locale === "zh" ? "分类 / 标签" : "Category / Tags"}</span>
+            <span>{locale === "zh" ? "更新" : "Updated"}</span>
+          </div>
+          {isLoading ? (
+            <div className="admin-loading-list" role="status" aria-label={locale === "zh" ? "正在加载文章" : "Loading posts"}>
+              <span /><span /><span /><span />
+            </div>
+          ) : null}
+          {error ? (
+            <div className="admin-table__message" role="alert">
+              <strong>{locale === "zh" ? "文章加载失败" : "Could not load posts"}</strong>
+              <span>{error}</span>
+              <button className="secondary-button" type="button" onClick={() => setReloadKey((current) => current + 1)}>
+                {locale === "zh" ? "重试" : "Retry"}
+              </button>
+            </div>
+          ) : null}
+          {!isLoading && !error && posts.length === 0 ? (
+            <div className="admin-table__message admin-table__empty">
+              <strong>{locale === "zh" ? "还没有文章" : "No posts yet"}</strong>
+              <span>{locale === "zh" ? "从第一篇草稿开始建立你的内容库。" : "Start the library with your first draft."}</span>
+              <Link className="primary-button" to="/admin/posts/new">{locale === "zh" ? "新建文章" : "New post"}</Link>
+            </div>
+          ) : null}
+          {!isLoading && !error && posts.length > 0 && filteredPosts.length === 0 ? (
+            <div className="admin-table__message admin-table__empty">
+              <strong>{locale === "zh" ? "没有匹配的文章" : "No matching posts"}</strong>
+              <span>{locale === "zh" ? "尝试调整搜索词或清除筛选条件。" : "Try another search or clear the current filters."}</span>
+              <button className="secondary-button" type="button" onClick={clearFilters}>{locale === "zh" ? "清除筛选" : "Clear filters"}</button>
+            </div>
+          ) : null}
+          {!isLoading && !error ? filteredPosts.map((post) => {
             const hasZh = hasLocale(post, "zh");
             const hasEn = hasLocale(post, "en");
 
             return (
               <Link className="admin-row" key={post.id} to={`/admin/posts/${post.id}`}>
                 <div className="admin-row__main">
-                  <span className="admin-row__slug">{post.slug}</span>
                   <strong>{getPostTitle(post, locale)}</strong>
-                  <span className="admin-row__date">{formatDate(post.publishedAt, locale)}</span>
+                  <span className="admin-row__slug">{post.slug}</span>
                 </div>
                 <span className={`status-pill status-pill--${post.status}`}>{getStatusLabel(post.status, locale)}</span>
                 <span className="locale-coverage">
-                  <span className={hasZh ? "is-ready" : undefined}>ZH</span>
-                  <span className={hasEn ? "is-ready" : undefined}>EN</span>
+                  <span className={hasZh ? "is-ready" : undefined}><i aria-hidden="true" />ZH</span>
+                  <span className={hasEn ? "is-ready" : undefined}><i aria-hidden="true" />EN</span>
                 </span>
                 <span className="admin-row__tags">
                   {[post.category?.name, ...post.tags.map((tag) => tag.name)].filter(Boolean).join(" / ") ||
                     (locale === "zh" ? "未分类" : "Uncategorized")}
                 </span>
+                <span className="admin-row__date">{formatDate(post.updatedAt, locale)}</span>
+                <span className="admin-row__chevron" aria-hidden="true">›</span>
               </Link>
             );
-          })}
+          }) : null}
         </div>
       </div>
     </section>

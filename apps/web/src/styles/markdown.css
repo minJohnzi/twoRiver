@@ -1,7 +1,7 @@
 .markdown-body {
   color: var(--color-text);
-  font-size: 17px;
-  line-height: 1.82;
+  font-size: 16px;
+  line-height: 1.76;
 }
 
 .markdown-body > *:first-child {
