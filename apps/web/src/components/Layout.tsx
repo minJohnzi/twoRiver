@@ -1,6 +1,6 @@
 import type { Locale } from "@tworiver/shared";
 import type { ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { matchPath, NavLink, useLocation } from "react-router-dom";
 import { AdminShell } from "./AdminShell";
 import { LanguageToggle } from "./LanguageToggle";
 import { TwoRiverMark } from "./TwoRiverMark";
@@ -15,6 +15,12 @@ interface LayoutProps {
   onLogout?: () => void;
 }
 
+const PUBLIC_ROUTE_PATTERNS = ["/", "/posts/:slug", "/categories", "/categories/:slug", "/tags", "/tags/:slug", "/about"];
+
+function isKnownPublicPath(pathname: string): boolean {
+  return PUBLIC_ROUTE_PATTERNS.some((path) => matchPath({ path, end: true }, pathname));
+}
+
 export function Layout({
   children,
   locale,
@@ -27,6 +33,7 @@ export function Layout({
   const { pathname } = useLocation();
   const isAdminRoute = pathname.startsWith("/admin");
   const isAdminWorkspace = isAdminRoute && pathname !== "/admin/login";
+  const isPublicNotFoundRoute = !isAdminRoute && !isKnownPublicPath(pathname);
   const nextTheme = theme === "dark" ? "light" : "dark";
 
   if (isAdminWorkspace) {
@@ -49,27 +56,29 @@ export function Layout({
   return (
     <div className="app-shell" data-theme={theme}>
       <main className={isAdminRoute ? "site-main site-main--wide" : "site-main"}>
-        <header className="site-header">
-          <NavLink to="/" className="site-brand" aria-label="TwoRiver home">
-            <TwoRiverMark />
-            <span>TwoRiver</span>
-          </NavLink>
-          <nav className="site-nav" aria-label="Primary navigation">
-            <NavLink to="/" end>
-              writing
+        {!isPublicNotFoundRoute ? (
+          <header className="site-header">
+            <NavLink to="/" className="site-brand" aria-label="TwoRiver home">
+              <TwoRiverMark />
+              <span>TwoRiver</span>
             </NavLink>
-            <NavLink to="/about">about</NavLink>
-            <button
-              type="button"
-              className="theme-toggle"
-              aria-label={`Switch to ${nextTheme} theme`}
-              onClick={() => onThemeChange(nextTheme)}
-            >
-              {theme === "dark" ? "light" : "dark"}
-            </button>
-            <LanguageToggle locale={locale} onLocaleChange={onLocaleChange} />
-          </nav>
-        </header>
+            <nav className="site-nav" aria-label="Primary navigation">
+              <NavLink to="/" end>
+                writing
+              </NavLink>
+              <NavLink to="/about">about</NavLink>
+              <button
+                type="button"
+                className="theme-toggle"
+                aria-label={`Switch to ${nextTheme} theme`}
+                onClick={() => onThemeChange(nextTheme)}
+              >
+                {theme === "dark" ? "light" : "dark"}
+              </button>
+              <LanguageToggle locale={locale} onLocaleChange={onLocaleChange} />
+            </nav>
+          </header>
+        ) : null}
         {children}
       </main>
     </div>

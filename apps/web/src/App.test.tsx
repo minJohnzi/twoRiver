@@ -266,7 +266,7 @@ describe("public taxonomy routes", () => {
     expect(screen.getByRole("link", { name: "Published flow" })).toHaveAttribute("href", "/posts/published-flow");
   });
 
-  it("renders a dedicated 404 page for unknown routes", async () => {
+  it("renders a dedicated Chinese 404 page for unknown routes", async () => {
     mockedFetchPosts.mockResolvedValue({ posts: [], total: 0, page: 1, limit: 20 });
     mockedFetchTags.mockResolvedValue({ tags: [] });
 
@@ -276,8 +276,40 @@ describe("public taxonomy routes", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/");
+    expect(await screen.findByRole("heading", { name: "404" })).toBeInTheDocument();
+    expect(screen.getByText("TWORIVER://404")).toBeInTheDocument();
+    expect(screen.getByText("route.missing")).toBeInTheDocument();
+    expect(screen.getByText("最后一次信号停在未发布的岸边。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "回到首页" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "浏览标签" })).toHaveAttribute("href", "/tags");
+    expect(screen.queryByText("The last signal stopped on an unpublished shore.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Back home" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Browse tags" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Categories" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
+  });
+
+  it("renders a dedicated English 404 page for unknown routes", async () => {
+    window.localStorage.setItem("tworiver_locale", "en");
+    mockedFetchPosts.mockResolvedValue({ posts: [], total: 0, page: 1, limit: 20 });
+    mockedFetchTags.mockResolvedValue({ tags: [] });
+
+    render(
+      <MemoryRouter initialEntries={["/not-a-real-route"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "404" })).toBeInTheDocument();
+    expect(screen.getByText("TWORIVER://404")).toBeInTheDocument();
+    expect(screen.getByText("route.missing")).toBeInTheDocument();
+    expect(screen.getByText("The last signal stopped on an unpublished shore.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back home" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Browse tags" })).toHaveAttribute("href", "/tags");
+    expect(screen.queryByText("最后一次信号停在未发布的岸边。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "回到首页" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "浏览标签" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Primary navigation" })).not.toBeInTheDocument();
   });
 
   it("scrolls article pages back to the top", async () => {

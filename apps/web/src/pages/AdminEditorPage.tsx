@@ -1,10 +1,21 @@
 import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
-import { type ClipboardEvent, type DragEvent, type FormEvent, useDeferredValue, useEffect, useRef, useState } from "react";
+import {
+  type ClipboardEvent,
+  type DragEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createAdminPost,
   deleteAdminPost,
   fetchAdminCategories,
+  fetchAdminPosts,
   fetchAdminPost,
   translateAdminPostDraft,
   updateAdminPost,
@@ -19,14 +30,31 @@ interface AdminEditorPageProps {
 type TranslationDraft = Record<Locale, Pick<PostTranslation, "title" | "summary" | "contentMarkdown">>;
 type SaveAction = "draft" | "save" | "publish" | "hide" | "republish" | null;
 type ActionNotice = { tone: "pending" | "success" | "error"; title: string; detail: string };
+type MarkdownEditorMode = "source" | "split" | "preview";
+type MarkdownSearchState = { isOpen: boolean; query: string; currentIndex: number };
+
+interface MarkdownHeading {
+  id: string;
+  level: number;
+  text: string;
+  lineStart: number;
+}
+
+interface SearchMatch {
+  start: number;
+  end: number;
+}
 
 const EMPTY_TRANSLATIONS: TranslationDraft = {
   zh: { title: "", summary: "", contentMarkdown: "" },
   en: { title: "", summary: "", contentMarkdown: "" }
 };
 
+const POST_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_IMAGE_ALT = "图片";
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const EMPTY_SEARCH_STATE: MarkdownSearchState = { isOpen: false, query: "", currentIndex: 0 };
+const MARKDOWN_EDITOR_MODES: MarkdownEditorMode[] = ["source", "split", "preview"];
 
 function cloneTranslations(): TranslationDraft {
   return {
@@ -68,6 +96,14 @@ function buildInput(
         ? nextTranslations
         : [{ ...translations.zh, locale: "zh", seoTitle: null, seoDescription: null }]
   };
+}
+
+function normalizeSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function otherLocale(source: Locale): Locale {
@@ -153,12 +189,189 @@ function hasTranslationContent(translation: TranslationDraft[Locale]): boolean {
   return Boolean(translation.title.trim() || translation.summary.trim() || translation.contentMarkdown.trim());
 }
 
+function canNormalizeSlug(value: string): boolean {
+  return /[a-z0-9]/i.test(value);
+}
+
+function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | null {
+  if (!POST_SLUG_PATTERN.test(input.slug)) {
+    return uiLocale === "zh"
+      ? "Slug 只能使用小写英文字母、数字和连字符，例如 my-post-11。"
+      : "Slug can use only lowercase letters, numbers, and hyphens, such as my-post-11.";
+  }
+
+  const translationWithoutTitle = input.translations.find((translation) => !translation.title.trim());
+  if (translationWithoutTitle) {
+    return uiLocale === "zh"
+      ? "每个有内容的语言版本都需要标题。"
+      : "Every language version with content needs a title.";
+  }
+
+  const invalidTag = input.tagSlugs.find((tagSlug) => !canNormalizeSlug(tagSlug));
+  if (invalidTag) {
+    return uiLocale === "zh"
+      ? `标签“${invalidTag}”至少需要包含英文字母或数字。`
+      : `Tag "${invalidTag}" needs at least one letter or number.`;
+  }
+
+  return null;
+}
+
+function getAutoSlugSeed(translations: TranslationDraft, activeLocale: Locale): string {
+  const locales: Locale[] = [activeLocale, otherLocale(activeLocale)];
+  const fields: Array<keyof TranslationDraft[Locale]> = ["title", "summary", "contentMarkdown"];
+
+  for (const field of fields) {
+    for (const translationLocale of locales) {
+      const slug = normalizeSlug(translations[translationLocale][field]);
+      if (slug) {
+        return slug;
+      }
+    }
+  }
+
+  return "post";
+}
+
+function getNextAvailableSlug(baseSlug: string, usedSlugs: Set<string>): string {
+  if (!usedSlugs.has(baseSlug)) {
+    return baseSlug;
+  }
+
+  let suffix = 2;
+  while (usedSlugs.has(`${baseSlug}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${baseSlug}-${suffix}`;
+}
+
+function findDuplicateSlugPost(
+  slug: string,
+  posts: Array<{ id: number; slug: string }>,
+  currentPostId: number | undefined
+): { id: number; slug: string } | undefined {
+  return posts.find((post) => post.slug === slug && post.id !== currentPostId);
+}
+
+function resolvePostSlug(
+  input: UpsertPostInput,
+  translations: TranslationDraft,
+  activeLocale: Locale,
+  posts: Array<{ id: number; slug: string }>,
+  currentPostId: number | undefined,
+  uiLocale: Locale
+): { input: UpsertPostInput; error: string | null; wasGenerated: boolean } {
+  if (input.slug) {
+    const duplicate = findDuplicateSlugPost(input.slug, posts, currentPostId);
+    if (duplicate) {
+      return {
+        input,
+        error:
+          uiLocale === "zh"
+            ? `Slug “${input.slug}” 已被其他文章使用。请换一个。`
+            : `Slug "${input.slug}" is already used by another post.`,
+        wasGenerated: false
+      };
+    }
+
+    return { input, error: null, wasGenerated: false };
+  }
+
+  const usedSlugs = new Set(posts.filter((post) => post.id !== currentPostId).map((post) => post.slug));
+  const slug = getNextAvailableSlug(getAutoSlugSeed(translations, activeLocale), usedSlugs);
+  return {
+    input: { ...input, slug },
+    error: null,
+    wasGenerated: true
+  };
+}
+
+function localizeSaveError(message: string, uiLocale: Locale): string {
+  if (message === "Post slug already exists") {
+    return uiLocale === "zh" ? "Slug 已被其他文章使用。请换一个。" : "Slug is already used by another post.";
+  }
+
+  return message;
+}
+
+function markdownModeLabel(mode: MarkdownEditorMode, uiLocale: Locale): string {
+  const labels: Record<MarkdownEditorMode, { zh: string; en: string }> = {
+    source: { zh: "MD源码", en: "MD source" },
+    split: { zh: "源码-预览", en: "Source + preview" },
+    preview: { zh: "预览", en: "Preview" }
+  };
+  return labels[mode][uiLocale];
+}
+
+function stripMarkdownHeadingText(value: string): string {
+  return value
+    .replace(/\s+#+\s*$/g, "")
+    .replace(/[`*_~[\]()]/g, "")
+    .trim();
+}
+
+function collectMarkdownHeadings(markdown: string): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
+  const lines = markdown.split(/\n/);
+  let offset = 0;
+  let isInFence = false;
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trimStart();
+    if (/^(```|~~~)/.test(trimmed)) {
+      isInFence = !isInFence;
+    }
+
+    if (!isInFence) {
+      const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+      if (match) {
+        const marker = match[1];
+        const rawText = match[2];
+        const text = rawText ? stripMarkdownHeadingText(rawText) : "";
+        if (marker && text) {
+          headings.push({
+            id: `${index}-${text.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+            level: marker.length,
+            text,
+            lineStart: offset
+          });
+        }
+      }
+    }
+
+    offset += line.length + 1;
+  });
+
+  return headings;
+}
+
+function findSearchMatches(markdown: string, query: string): SearchMatch[] {
+  const needle = query.trim();
+  if (!needle) {
+    return [];
+  }
+
+  const matches: SearchMatch[] = [];
+  const haystack = markdown.toLocaleLowerCase();
+  const normalizedNeedle = needle.toLocaleLowerCase();
+  let index = haystack.indexOf(normalizedNeedle);
+
+  while (index !== -1) {
+    matches.push({ start: index, end: index + needle.length });
+    index = haystack.indexOf(normalizedNeedle, index + Math.max(needle.length, 1));
+  }
+
+  return matches;
+}
+
 export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const navigate = useNavigate();
   const { id } = useParams();
   const postId = id && id !== "new" ? Number(id) : undefined;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const markdownTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const markdownSearchInputRef = useRef<HTMLInputElement | null>(null);
   const previewPaneRef = useRef<HTMLElement | null>(null);
   const isUploadingImageRef = useRef(false);
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
@@ -170,6 +383,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [categorySlug, setCategorySlug] = useState("");
   const [tagText, setTagText] = useState("");
   const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
+  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("split");
+  const [markdownSearch, setMarkdownSearch] = useState<MarkdownSearchState>(EMPTY_SEARCH_STATE);
   const [isLoading, setIsLoading] = useState(Boolean(postId));
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
@@ -384,6 +599,101 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     void uploadImageFile(file);
   }
 
+  function changeEditorMode(mode: MarkdownEditorMode) {
+    setEditorMode(mode);
+    if (mode === "preview") {
+      setMarkdownSearch(EMPTY_SEARCH_STATE);
+    }
+  }
+
+  function selectMarkdownRange(start: number, end: number) {
+    window.setTimeout(() => {
+      const textarea = markdownTextareaRef.current;
+      if (!textarea) {
+        return;
+      }
+      textarea.focus();
+      textarea.setSelectionRange(start, end);
+    }, 0);
+  }
+
+  function selectSearchMatch(matches: SearchMatch[], index: number) {
+    if (matches.length === 0) {
+      return;
+    }
+
+    const nextIndex = ((index % matches.length) + matches.length) % matches.length;
+    const match = matches[nextIndex];
+    if (!match) {
+      return;
+    }
+
+    setMarkdownSearch((current) => ({ ...current, currentIndex: nextIndex }));
+    selectMarkdownRange(match.start, match.end);
+  }
+
+  function openMarkdownSearch() {
+    const { selectedText } = getSelectedMarkdownDetails();
+    const nextQuery = selectedText && !selectedText.includes("\n") ? selectedText : markdownSearch.query;
+    const nextMatches = findSearchMatches(translations[activeLocale].contentMarkdown, nextQuery);
+    setMarkdownSearch({ isOpen: true, query: nextQuery, currentIndex: 0 });
+
+    window.requestAnimationFrame(() => {
+      markdownSearchInputRef.current?.focus();
+      markdownSearchInputRef.current?.select();
+    });
+
+    if (nextMatches.length > 0) {
+      selectSearchMatch(nextMatches, 0);
+    }
+  }
+
+  function closeMarkdownSearch() {
+    setMarkdownSearch(EMPTY_SEARCH_STATE);
+    markdownTextareaRef.current?.focus();
+  }
+
+  function updateMarkdownSearchQuery(value: string) {
+    const nextMatches = findSearchMatches(translations[activeLocale].contentMarkdown, value);
+    setMarkdownSearch({ isOpen: true, query: value, currentIndex: 0 });
+    if (nextMatches.length > 0) {
+      selectSearchMatch(nextMatches, 0);
+    }
+  }
+
+  function moveMarkdownSearchMatch(delta: number) {
+    const matches = findSearchMatches(translations[activeLocale].contentMarkdown, markdownSearch.query);
+    if (matches.length === 0) {
+      return;
+    }
+    selectSearchMatch(matches, markdownSearch.currentIndex + delta);
+  }
+
+  function handleMarkdownSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      moveMarkdownSearchMatch(event.shiftKey ? -1 : 1);
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMarkdownSearch();
+    }
+  }
+
+  function handleMarkdownKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      openMarkdownSearch();
+    }
+  }
+
+  function jumpToMarkdownOffset(offset: number) {
+    if (editorMode === "preview") {
+      setEditorMode("split");
+    }
+    selectMarkdownRange(offset, offset);
+  }
+
   async function savePost(nextStatus: PostStatus, action: NonNullable<SaveAction>) {
     setError(null);
     setTranslationWarnings([]);
@@ -393,10 +703,28 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       title: actionPendingTitle(action, locale),
       detail: actionNoticeDetail(action, "pending", locale)
     });
-    const input = buildInput(slug, nextStatus, publishedAt, categorySlug, tagText, translations);
 
     try {
-      const { post } = postId ? await updateAdminPost(postId, input) : await createAdminPost(input);
+      const input = buildInput(slug, nextStatus, publishedAt, categorySlug, tagText, translations);
+      const { posts } = await fetchAdminPosts();
+      const resolved = resolvePostSlug(input, translations, activeLocale, posts, postId, locale);
+      const validationMessage = resolved.error ?? validatePostInput(resolved.input, locale);
+
+      if (validationMessage) {
+        setActionNotice({
+          tone: "error",
+          title: actionFailureTitle(action, locale),
+          detail: validationMessage
+        });
+        setError(validationMessage);
+        return;
+      }
+
+      if (resolved.wasGenerated) {
+        setSlug(resolved.input.slug);
+      }
+
+      const { post } = postId ? await updateAdminPost(postId, resolved.input) : await createAdminPost(resolved.input);
       setPostUid(post.uid);
       setStatus(post.status);
       setPublishedAt(post.publishedAt);
@@ -409,7 +737,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         navigate(`/admin/posts/${post.id}`);
       }
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Failed to save post";
+      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to save post", locale);
       setActionNotice({
         tone: "error",
         title: actionFailureTitle(action, locale),
@@ -486,8 +814,13 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   function focusPreview() {
-    previewPaneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    previewPaneRef.current?.focus();
+    if (editorMode === "source") {
+      setEditorMode("split");
+    }
+    window.requestAnimationFrame(() => {
+      previewPaneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      previewPaneRef.current?.focus();
+    });
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -497,6 +830,12 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   const currentTranslation = translations[activeLocale];
   const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
+  const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
+  const markdownSearchMatches = useMemo(
+    () => findSearchMatches(currentTranslation.contentMarkdown, markdownSearch.query),
+    [currentTranslation.contentMarkdown, markdownSearch.query]
+  );
+  const activeSearchIndex = markdownSearchMatches.length > 0 ? Math.min(markdownSearch.currentIndex, markdownSearchMatches.length - 1) : -1;
   const targetLocale = otherLocale(activeLocale);
   const isBusy = Boolean(saveAction) || isDeleting || isTranslating;
   const canPreview = Boolean(postId && slug.trim() && status !== "draft");
@@ -579,7 +918,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           </div>
         ) : null}
 
-        <div className="editor-grid">
+        <div className={`editor-grid editor-grid--${editorMode}`}>
           <div className="editor-fields">
             <div className="editor-card">
               <div className="editor-card__heading">
@@ -593,6 +932,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 <span>Slug</span>
                 <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="my-technical-note" />
               </label>
+              <p className="field-hint">
+                {locale === "zh"
+                  ? "只能使用小写英文字母、数字和连字符；留空会按标题、摘要、正文自动生成，并追加 -2、-3 避免重复。"
+                  : "Use lowercase letters, numbers, and hyphens only. Leave blank to generate one from the title, summary, or body, with -2/-3 added when needed."}
+              </p>
               <label>
                 <span>{locale === "zh" ? "分类" : "Category"}</span>
                 <select value={categorySlug} onChange={(event) => setCategorySlug(event.target.value)}>
@@ -662,7 +1006,42 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 <span>{locale === "zh" ? "摘要" : "Summary"}</span>
                 <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
               </label>
-              <div className="editor-field">
+              <div className="markdown-mode-row" role="tablist" aria-label="Markdown editor mode">
+                {MARKDOWN_EDITOR_MODES.map((mode) => (
+                  <button
+                    type="button"
+                    key={mode}
+                    className={editorMode === mode ? "is-active" : undefined}
+                    aria-pressed={editorMode === mode}
+                    onClick={() => changeEditorMode(mode)}
+                  >
+                    {markdownModeLabel(mode, locale)}
+                  </button>
+                ))}
+              </div>
+              <div className="markdown-outline-panel" aria-label={locale === "zh" ? "Markdown 大纲" : "Markdown outline"}>
+                <div className="markdown-outline-panel__heading">
+                  <span>{locale === "zh" ? "标题大纲" : "Outline"}</span>
+                  <strong>{markdownHeadings.length}</strong>
+                </div>
+                {markdownHeadings.length > 0 ? (
+                  <ol className="markdown-outline-list">
+                    {markdownHeadings.map((heading) => (
+                      <li key={heading.id} className={`heading-level-${heading.level}`}>
+                        <button type="button" onClick={() => jumpToMarkdownOffset(heading.lineStart)}>
+                          {heading.text}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="field-hint">
+                    {locale === "zh" ? "添加 # 标题后会生成大纲。" : "Add # headings to build an outline."}
+                  </p>
+                )}
+              </div>
+              {editorMode !== "preview" ? (
+                <div className="editor-field editor-field--markdown-source">
                 <div className="markdown-control-row">
                   <span>Markdown body</span>
                   <input
@@ -702,12 +1081,42 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                       : "Choose a file, drop an image here, or paste a local screenshot directly."}
                   </p>
                 )}
-                <textarea
+                  {markdownSearch.isOpen ? (
+                    <div className="markdown-search-panel" role="search" aria-label={locale === "zh" ? "搜索 Markdown 正文" : "Search Markdown body"}>
+                      <input
+                        ref={markdownSearchInputRef}
+                        type="search"
+                        aria-label={locale === "zh" ? "搜索 Markdown 正文" : "Search Markdown body"}
+                        value={markdownSearch.query}
+                        onChange={(event) => updateMarkdownSearchQuery(event.target.value)}
+                        onKeyDown={handleMarkdownSearchKeyDown}
+                        placeholder={locale === "zh" ? "搜索正文" : "Search body"}
+                      />
+                      <span className="markdown-search-panel__count" aria-live="polite">
+                        {markdownSearch.query
+                          ? markdownSearchMatches.length > 0
+                            ? `${activeSearchIndex + 1}/${markdownSearchMatches.length}`
+                            : "0/0"
+                          : "0"}
+                      </span>
+                      <button type="button" className="secondary-button" onClick={() => moveMarkdownSearchMatch(-1)}>
+                        {locale === "zh" ? "上一个" : "Prev"}
+                      </button>
+                      <button type="button" className="secondary-button" onClick={() => moveMarkdownSearchMatch(1)}>
+                        {locale === "zh" ? "下一个" : "Next"}
+                      </button>
+                      <button type="button" className="secondary-button" onClick={closeMarkdownSearch}>
+                        {locale === "zh" ? "关闭" : "Close"}
+                      </button>
+                    </div>
+                  ) : null}
+                  <textarea
                   ref={markdownTextareaRef}
                   aria-label="Markdown body"
                   className={isDraggingImage ? "markdown-drop-target is-dragging" : "markdown-drop-target"}
                   value={currentTranslation.contentMarkdown}
                   onChange={(event) => updateTranslation("contentMarkdown", event.target.value)}
+                  onKeyDown={handleMarkdownKeyDown}
                   onDragEnter={(event) => {
                     if (hasImageTransfer(event.dataTransfer.items)) {
                       setIsDraggingImage(true);
@@ -723,7 +1132,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                   onPaste={handleMarkdownPaste}
                   rows={18}
                 />
-              </div>
+                </div>
+              ) : null}
 
               {translationWarnings.length > 0 ? (
                 <p className="warning-text">
@@ -734,13 +1144,15 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
             </div>
           </div>
 
-          <aside ref={previewPaneRef} id="editor-preview" className="preview-pane" tabIndex={-1}>
+          {editorMode !== "source" ? (
+            <aside ref={previewPaneRef} id="editor-preview" className={`preview-pane preview-pane--${editorMode}`} tabIndex={-1}>
             <div className="preview-pane__heading">
               <span>{locale === "zh" ? "预览" : "Preview"}</span>
               <strong>{languageLabel(activeLocale, locale)}</strong>
             </div>
-            <MarkdownPreview markdown={deferredMarkdown} />
-          </aside>
+            <MarkdownPreview markdown={deferredMarkdown} locale={locale} />
+            </aside>
+          ) : null}
         </div>
       </form>
 

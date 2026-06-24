@@ -1,25 +1,8 @@
 import type { Locale, PostTranslation, PublicPost } from "@tworiver/shared";
-import "highlight.js/styles/github.css";
-import { marked } from "marked";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchPost } from "../api/posts";
-import { hljs } from "../utils/highlight";
-import { sanitizeMarkdownHtml } from "../utils/sanitizeMarkdown";
-
-marked.use({
-  renderer: {
-    code(token) {
-      const language = token.lang?.split(/\s+/)[0] ?? "";
-      const highlighted =
-        language && hljs.getLanguage(language)
-          ? hljs.highlight(token.text, { language }).value
-          : hljs.highlightAuto(token.text).value;
-      const languageClass = language ? ` class="language-${language}"` : "";
-      return `<pre><code${languageClass}>${highlighted}</code></pre>`;
-    }
-  }
-});
+import { MarkdownPreview } from "../components/MarkdownPreview";
 
 interface PostPageProps {
   locale: Locale;
@@ -91,9 +74,6 @@ export function PostPage({ locale }: PostPageProps) {
   }, [slug]);
 
   const translation = post ? findTranslation(post.translations, locale) : undefined;
-  const renderedMarkdown = useMemo(() => {
-    return sanitizeMarkdownHtml(marked.parse(translation?.contentMarkdown ?? "", { async: false }) as string);
-  }, [translation?.contentMarkdown]);
 
   if (isLoading) {
     return (
@@ -134,7 +114,7 @@ export function PostPage({ locale }: PostPageProps) {
         <h1>{translation.title}</h1>
         {translation.summary ? <p>{translation.summary}</p> : null}
       </header>
-      <div className="markdown-body" dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+      <MarkdownPreview markdown={translation.contentMarkdown} locale={locale} />
       <button className="back-to-top" type="button" onClick={scrollToTop}>
         <span aria-hidden="true">↑</span>
         {locale === "zh" ? "回到开头" : "Back to top"}

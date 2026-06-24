@@ -7,6 +7,7 @@ import {
   createAdminPost,
   deleteAdminPost,
   fetchAdminCategories,
+  fetchAdminPosts,
   fetchAdminPost,
   translateAdminPostDraft,
   updateAdminPost,
@@ -19,6 +20,7 @@ vi.mock("../api/admin", () => ({
   createAdminPost: vi.fn(),
   deleteAdminPost: vi.fn(),
   fetchAdminCategories: vi.fn(),
+  fetchAdminPosts: vi.fn(),
   fetchAdminPost: vi.fn(),
   translateAdminPostDraft: vi.fn(),
   updateAdminPost: vi.fn(),
@@ -28,6 +30,7 @@ vi.mock("../api/admin", () => ({
 const mockedCreateAdminPost = vi.mocked(createAdminPost);
 const mockedDeleteAdminPost = vi.mocked(deleteAdminPost);
 const mockedFetchAdminCategories = vi.mocked(fetchAdminCategories);
+const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
 const mockedFetchAdminPost = vi.mocked(fetchAdminPost);
 const mockedTranslateAdminPostDraft = vi.mocked(translateAdminPostDraft);
 const mockedUpdateAdminPost = vi.mocked(updateAdminPost);
@@ -87,10 +90,29 @@ async function loadedMarkdownTextarea() {
 
 describe("MarkdownPreview", () => {
   it("renders headings and fenced code blocks", () => {
-    render(<MarkdownPreview markdown={"# Title\n\n```ts\nconst value = 1;\n```"} />);
+    const { container } = render(<MarkdownPreview markdown={"# Title\n\n```ts\nconst value = 1;\n```"} />);
 
     expect(screen.getByRole("heading", { name: "Title" })).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.tagName === "CODE")).toHaveTextContent("const value = 1;");
+    expect(container.querySelector(".hljs-keyword")).toHaveTextContent("const");
+    expect(container.querySelector(".code-window")).toBeInTheDocument();
+    expect(container.querySelectorAll(".window-dots span")).toHaveLength(3);
+    expect(screen.getByText("ts")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  });
+
+  it("copies fenced code blocks to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+
+    const { container } = render(<MarkdownPreview markdown={"```ts\nconst value = 1;\n```"} />);
+    fireEvent.click(within(container).getByRole("button", { name: "Copy" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("const value = 1;"));
+    expect(within(container).getByRole("button", { name: "Copied" })).toHaveTextContent("Copied");
   });
 
   it("removes executable markdown HTML and unsafe links", () => {
@@ -118,12 +140,19 @@ describe("MarkdownPreview", () => {
 
     expect(container.querySelector("img")).toHaveAttribute("src", "http://localhost:4000/uploads/images/posts/p_111/photo.png");
   });
+
+  it("wraps tables for responsive markdown rendering", () => {
+    const { container } = render(<MarkdownPreview markdown={"| Name | Value |\n| --- | --- |\n| River | Two |"} />);
+
+    expect(container.querySelector(".markdown-table-wrap table")).toBeInTheDocument();
+  });
 });
 
 describe("admin editor image uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedFetchAdminCategories.mockResolvedValue({ categories: [] });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
     mockedFetchAdminPost.mockResolvedValue({ post: makePost() });
     mockedCreateAdminPost.mockResolvedValue({ post: makePost() });
     mockedUpdateAdminPost.mockResolvedValue({ post: makePost() });
@@ -299,6 +328,102 @@ describe("admin editor image uploads", () => {
     expect(textarea).toHaveValue("Hello world");
   });
 
+  it("shows a markdown heading outline outside fenced code blocks", async () => {
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makePost({
+        translations: [
+          {
+            locale: "zh",
+            title: "鑽夌",
+            summary: "",
+            contentMarkdown: "# 中文标题",
+            seoTitle: null,
+            seoDescription: null
+          },
+          {
+            locale: "en",
+            title: "Draft",
+            summary: "",
+            contentMarkdown: "# Intro\n\nSome text\n\n## Details\n\n```md\n# Ignored\n```",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    const outline = screen.getByLabelText("Markdown outline");
+
+    expect(within(outline).getByRole("button", { name: "Intro" })).toBeInTheDocument();
+    expect(within(outline).getByRole("button", { name: "Details" })).toBeInTheDocument();
+    expect(within(outline).queryByRole("button", { name: "Ignored" })).not.toBeInTheDocument();
+  });
+
+  it("switches between markdown source, split, and preview modes", async () => {
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makePost({
+        translations: [
+          {
+            locale: "zh",
+            title: "鑽夌",
+            summary: "",
+            contentMarkdown: "# 预览标题",
+            seoTitle: null,
+            seoDescription: null
+          },
+          {
+            locale: "en",
+            title: "Draft",
+            summary: "",
+            contentMarkdown: "# Preview heading",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+    renderEditor("/admin/posts/1");
+
+    expect(await loadedMarkdownTextarea()).toBeInTheDocument();
+    const modeTabs = screen.getByRole("tablist", { name: "Markdown editor mode" });
+
+    fireEvent.click(within(modeTabs).getByRole("button", { name: "Preview" }));
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+
+    fireEvent.click(within(modeTabs).getByRole("button", { name: "MD source" }));
+    expect(await loadedMarkdownTextarea()).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Preview heading" })).not.toBeInTheDocument();
+
+    fireEvent.click(within(modeTabs).getByRole("button", { name: "Source + preview" }));
+    expect(await loadedMarkdownTextarea()).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+  });
+
+  it("opens markdown body search with Ctrl+F and cycles matches", async () => {
+    renderEditor("/admin/posts/1");
+    const textarea = await loadedMarkdownTextarea();
+
+    fireEvent.change(textarea, { target: { value: "Alpha target beta target" } });
+    fireEvent.keyDown(textarea, { key: "f", code: "KeyF", ctrlKey: true });
+
+    const searchInput = await screen.findByRole("searchbox", { name: "Search Markdown body" });
+    fireEvent.change(searchInput, { target: { value: "target" } });
+
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    await waitFor(() => expect(textarea.selectionStart).toBe(6));
+
+    fireEvent.keyDown(searchInput, { key: "Enter" });
+
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    await waitFor(() => expect(textarea.selectionStart).toBe(18));
+
+    fireEvent.keyDown(searchInput, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("searchbox", { name: "Search Markdown body" })).not.toBeInTheDocument());
+  });
+
   it("shows draft actions separately from published and hidden actions", async () => {
     mockedFetchAdminPost.mockResolvedValue({ post: makePost({ status: "draft", publishedAt: null }) });
     renderEditor("/admin/posts/1");
@@ -343,6 +468,79 @@ describe("admin editor image uploads", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Slug is already in use");
   });
 
+  it("generates a slug from the title before publishing a new post", async () => {
+    renderEditor("/admin/posts/new");
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
+    fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    await waitFor(() =>
+      expect(mockedCreateAdminPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "short-title"
+        })
+      )
+    );
+  });
+
+  it("adds a numeric suffix when the generated slug already exists", async () => {
+    mockedFetchAdminPosts.mockResolvedValue({
+      posts: [makePost({ id: 2, slug: "short-title" }), makePost({ id: 3, slug: "short-title-2" })]
+    });
+    renderEditor("/admin/posts/new");
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
+    fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    await waitFor(() =>
+      expect(mockedCreateAdminPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "short-title-3"
+        })
+      )
+    );
+  });
+
+  it("blocks duplicate manually entered slugs before sending the request", async () => {
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [makePost({ id: 2, slug: "existing-post" })] });
+    renderEditor("/admin/posts/new");
+
+    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "existing-post" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
+    fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent('Slug "existing-post" is already used by another post');
+    expect(mockedCreateAdminPost).not.toHaveBeenCalled();
+  });
+
+  it("blocks malformed post slugs before sending the request", async () => {
+    renderEditor("/admin/posts/new");
+
+    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "Hello World" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
+    fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Slug can use only lowercase letters");
+    expect(mockedCreateAdminPost).not.toHaveBeenCalled();
+  });
+
+  it("blocks tag values that cannot become slugs", async () => {
+    renderEditor("/admin/posts/new");
+
+    fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "valid-post" } });
+    fireEvent.change(screen.getByLabelText("Tags (comma-separated)"), { target: { value: "!!!" } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
+    fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent('Tag "!!!" needs at least one letter or number');
+    expect(mockedCreateAdminPost).not.toHaveBeenCalled();
+  });
+
   it("hides a published post while preserving the original published time", async () => {
     mockedFetchAdminPost.mockResolvedValue({ post: makePost({ status: "published", publishedAt: "2026-05-01T00:00:00.000Z" }) });
     mockedUpdateAdminPost.mockResolvedValue({ post: makePost({ status: "hidden", publishedAt: "2026-05-01T00:00:00.000Z" }) });
@@ -360,7 +558,7 @@ describe("admin editor image uploads", () => {
         })
       )
     );
-    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Post actions")).getByRole("button", { name: "Preview" })).toBeInTheDocument();
   });
 
   it("republishes a hidden post without replacing its published time", async () => {
@@ -369,7 +567,7 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/1");
 
     await loadedMarkdownTextarea();
-    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Post actions")).getByRole("button", { name: "Preview" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Republish" }));
 
     await waitFor(() =>
