@@ -1,7 +1,6 @@
 import type { Locale } from "@tworiver/shared";
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { matchPath, NavLink, useLocation } from "react-router-dom";
-import { AdminShell } from "./AdminShell";
 import { LanguageToggle } from "./LanguageToggle";
 import { TwoRiverMark } from "./TwoRiverMark";
 
@@ -12,13 +11,25 @@ interface LayoutProps {
   isAdminAuthenticated?: boolean;
   onLocaleChange: (locale: Locale) => void;
   onThemeChange: (theme: "dark" | "light") => void;
+  onRouteIntent?: (pathname: string) => void;
   onLogout?: () => void;
 }
 
 const PUBLIC_ROUTE_PATTERNS = ["/", "/posts/:slug", "/categories", "/categories/:slug", "/tags", "/tags/:slug", "/about"];
+const AdminShell = lazy(async () => ({ default: (await import("./AdminShell")).AdminShell }));
 
 function isKnownPublicPath(pathname: string): boolean {
   return PUBLIC_ROUTE_PATTERNS.some((path) => matchPath({ path, end: true }, pathname));
+}
+
+function AdminShellFallback() {
+  return (
+    <main className="site-main site-main--wide">
+      <section className="page-section admin-panel">
+        <p className="muted">Loading...</p>
+      </section>
+    </main>
+  );
 }
 
 export function Layout({
@@ -28,6 +39,7 @@ export function Layout({
   isAdminAuthenticated = false,
   onLocaleChange,
   onThemeChange,
+  onRouteIntent,
   onLogout
 }: LayoutProps) {
   const { pathname } = useLocation();
@@ -35,20 +47,27 @@ export function Layout({
   const isAdminWorkspace = isAdminRoute && pathname !== "/admin/login";
   const isPublicNotFoundRoute = !isAdminRoute && !isKnownPublicPath(pathname);
   const nextTheme = theme === "dark" ? "light" : "dark";
+  const routeIntentProps = (nextPathname: string) => ({
+    onFocus: () => onRouteIntent?.(nextPathname),
+    onMouseEnter: () => onRouteIntent?.(nextPathname)
+  });
 
   if (isAdminWorkspace) {
     return (
       <div className="app-shell" data-theme={theme}>
-        <AdminShell
-          locale={locale}
-          theme={theme}
-          isAuthenticated={isAdminAuthenticated}
-          onLocaleChange={onLocaleChange}
-          onThemeChange={onThemeChange}
-          onLogout={onLogout}
-        >
-          {children}
-        </AdminShell>
+        <Suspense fallback={<AdminShellFallback />}>
+          <AdminShell
+            locale={locale}
+            theme={theme}
+            isAuthenticated={isAdminAuthenticated}
+            onLocaleChange={onLocaleChange}
+            onThemeChange={onThemeChange}
+            onRouteIntent={onRouteIntent}
+            onLogout={onLogout}
+          >
+            {children}
+          </AdminShell>
+        </Suspense>
       </div>
     );
   }
@@ -63,10 +82,10 @@ export function Layout({
               <span>TwoRiver</span>
             </NavLink>
             <nav className="site-nav" aria-label="Primary navigation">
-              <NavLink to="/" end>
+              <NavLink to="/" end {...routeIntentProps("/")}>
                 writing
               </NavLink>
-              <NavLink to="/about">about</NavLink>
+              <NavLink to="/about" {...routeIntentProps("/about")}>about</NavLink>
               <button
                 type="button"
                 className="theme-toggle"

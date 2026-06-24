@@ -46,10 +46,20 @@ interface AdminShellProps {
   isAuthenticated: boolean;
   onLocaleChange: (locale: Locale) => void;
   onThemeChange: (theme: "dark" | "light") => void;
+  onRouteIntent?: ((pathname: string) => void) | undefined;
   onLogout: (() => void) | undefined;
 }
 
-export function AdminShell({ children, locale, theme, isAuthenticated, onLocaleChange, onThemeChange, onLogout }: AdminShellProps) {
+export function AdminShell({
+  children,
+  locale,
+  theme,
+  isAuthenticated,
+  onLocaleChange,
+  onThemeChange,
+  onRouteIntent,
+  onLogout
+}: AdminShellProps) {
   const { pathname } = useLocation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const nextTheme = theme === "dark" ? "light" : "dark";
@@ -68,26 +78,30 @@ export function AdminShell({ children, locale, theme, isAuthenticated, onLocaleC
 
   useEffect(() => setIsMenuOpen(false), [pathname]);
   const closeMenu = () => setIsMenuOpen(false);
+  const routeIntentProps = (nextPathname: string) => ({
+    onFocus: () => onRouteIntent?.(nextPathname),
+    onMouseEnter: () => onRouteIntent?.(nextPathname)
+  });
 
   return (
     <div className="admin-app-shell">
       <aside id="admin-navigation" className={`admin-sidebar${isMenuOpen ? " is-open" : ""}`} aria-label={copy.navigation}>
         <div className="admin-sidebar__brand">
-          <Link to="/admin/posts" className="admin-brand" onClick={closeMenu}>
+          <Link to="/admin/posts" className="admin-brand" onClick={closeMenu} {...routeIntentProps("/admin/posts")}>
             <TwoRiverMark />
             <span><strong>TwoRiver</strong><small>Studio</small></span>
           </Link>
           <button className="admin-mobile-close" type="button" aria-label={copy.closeMenu} onClick={closeMenu}><AdminIcon name="x" /></button>
         </div>
         <nav className="admin-nav">
-          <NavLink to="/admin/posts" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu}><AdminIcon name="posts" /><span>{copy.posts}</span></NavLink>
-          <NavLink to="/admin/resources" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu}><AdminIcon name="resources" /><span>{copy.resources}</span></NavLink>
-          <NavLink to="/admin/categories" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu}><AdminIcon name="categories" /><span>{copy.categories}</span></NavLink>
-          <NavLink to="/admin/tags" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu}><AdminIcon name="tags" /><span>{copy.tags}</span></NavLink>
-          <NavLink to="/admin/about" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu}><AdminIcon name="about" /><span>{copy.about}</span></NavLink>
+          <NavLink to="/admin/posts" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu} {...routeIntentProps("/admin/posts")}><AdminIcon name="posts" /><span>{copy.posts}</span></NavLink>
+          <NavLink to="/admin/resources" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu} {...routeIntentProps("/admin/resources")}><AdminIcon name="resources" /><span>{copy.resources}</span></NavLink>
+          <NavLink to="/admin/categories" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu} {...routeIntentProps("/admin/categories")}><AdminIcon name="categories" /><span>{copy.categories}</span></NavLink>
+          <NavLink to="/admin/tags" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu} {...routeIntentProps("/admin/tags")}><AdminIcon name="tags" /><span>{copy.tags}</span></NavLink>
+          <NavLink to="/admin/about" className={({ isActive }) => (isActive ? "is-active" : undefined)} onClick={closeMenu} {...routeIntentProps("/admin/about")}><AdminIcon name="about" /><span>{copy.about}</span></NavLink>
         </nav>
         <div className="admin-sidebar__footer">
-          <Link to="/" onClick={closeMenu}><AdminIcon name="external" /><span>{copy.viewSite}</span></Link>
+          <Link to="/" onClick={closeMenu} {...routeIntentProps("/")}><AdminIcon name="external" /><span>{copy.viewSite}</span></Link>
           {isAuthenticated ? <button type="button" aria-label={`${copy.logout} / Logout`} onClick={onLogout}><AdminIcon name="logout" /><span>{copy.logout}</span></button> : null}
         </div>
       </aside>
@@ -95,7 +109,7 @@ export function AdminShell({ children, locale, theme, isAuthenticated, onLocaleC
       <div className="admin-app-main">
         <header className="admin-topbar">
           <button className="admin-menu-button" type="button" aria-label={isMenuOpen ? copy.closeMenu : copy.openMenu} aria-controls="admin-navigation" aria-expanded={isMenuOpen} onClick={() => setIsMenuOpen((current) => !current)}><AdminIcon name="menu" /></button>
-          <Link className="admin-topbar__brand" to="/admin/posts"><TwoRiverMark /><span>TwoRiver Studio</span></Link>
+          <Link className="admin-topbar__brand" to="/admin/posts" {...routeIntentProps("/admin/posts")}><TwoRiverMark /><span>TwoRiver Studio</span></Link>
           <div className="admin-topbar__actions">
             <button className="admin-icon-button" type="button" aria-label={`Switch to ${nextTheme} theme`} onClick={() => onThemeChange(nextTheme)}><AdminIcon name={theme === "dark" ? "sun" : "moon"} /></button>
             <LanguageToggle locale={locale} onLocaleChange={onLocaleChange} />

@@ -17,7 +17,6 @@ export function HomePage({ locale }: HomePageProps) {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
 
     async function loadContent() {
       setIsLoading(true);
@@ -25,8 +24,8 @@ export function HomePage({ locale }: HomePageProps) {
 
       try {
         const [{ posts: nextPosts }, { tags: nextTags }] = await Promise.all([
-          fetchPosts({ init: { signal: controller.signal } }),
-          fetchTags({ signal: controller.signal })
+          fetchPosts(),
+          fetchTags()
         ]);
 
         if (isMounted) {
@@ -34,11 +33,11 @@ export function HomePage({ locale }: HomePageProps) {
           setTags(nextTags);
         }
       } catch (caught) {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setError(caught instanceof Error ? caught.message : "Failed to load posts");
         }
       } finally {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setIsLoading(false);
         }
       }
@@ -48,7 +47,6 @@ export function HomePage({ locale }: HomePageProps) {
 
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, []);
 

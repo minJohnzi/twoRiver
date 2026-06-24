@@ -61,28 +61,26 @@ export function CategoryListPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
-    fetchCategories({ signal: controller.signal })
+    fetchCategories()
       .then(({ categories: nextCategories }) => {
         if (isMounted) {
           setCategories(nextCategories);
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setError(caught instanceof Error ? caught.message : "Failed to load categories");
         }
       })
       .finally(() => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setIsLoading(false);
         }
       });
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, []);
 
@@ -100,28 +98,26 @@ export function TagListPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
-    fetchTags({ signal: controller.signal })
+    fetchTags()
       .then(({ tags: nextTags }) => {
         if (isMounted) {
           setTags(nextTags);
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tags");
         }
       })
       .finally(() => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setIsLoading(false);
         }
       });
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, []);
 
@@ -141,10 +137,9 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
-    fetchCategoryDetail(slug, { signal: controller.signal })
+    fetchCategoryDetail(slug)
       .then((response) => {
         if (isMounted) {
           setCategory(response.category);
@@ -152,18 +147,17 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setError(caught instanceof Error ? caught.message : "Failed to load category");
         }
       })
       .finally(() => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setIsLoading(false);
         }
       });
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, [slug]);
 
@@ -194,10 +188,9 @@ export function TagDetailPage({ locale }: LocaleProps) {
 
   useEffect(() => {
     let isMounted = true;
-    const controller = new AbortController();
     setIsLoading(true);
     setError(null);
-    fetchTagDetail(slug, { signal: controller.signal })
+    fetchTagDetail(slug)
       .then((response) => {
         if (isMounted) {
           setTag(response.tag);
@@ -205,18 +198,17 @@ export function TagDetailPage({ locale }: LocaleProps) {
         }
       })
       .catch((caught: unknown) => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setError(caught instanceof Error ? caught.message : "Failed to load tag");
         }
       })
       .finally(() => {
-        if (isMounted && !controller.signal.aborted) {
+        if (isMounted) {
           setIsLoading(false);
         }
       });
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, [slug]);
 

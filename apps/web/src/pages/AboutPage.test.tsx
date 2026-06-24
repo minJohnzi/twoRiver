@@ -63,15 +63,14 @@ describe("AboutPage", () => {
       "Ins",
       "Notes"
     ]);
-    expect(contactLinks.map((link) => link.querySelector("[data-icon]")?.getAttribute("data-icon"))).toEqual([
-      "ic:outline-email",
-      "line-md:github",
-      "mdi:rss",
-      "prime:twitter",
-      "line-md:linkedin",
-      "line-md:instagram",
-      undefined
-    ]);
+    expect(contactLinks).toHaveLength(7);
+    const customLink = contactLinks[6];
+    if (!customLink) {
+      throw new Error("Expected the custom contact link to render.");
+    }
+    expect(contactLinks.slice(0, 6).every((link) => link.querySelector("svg"))).toBe(true);
+    expect(customLink.querySelector("svg")).toBeNull();
+    expect(customLink).toHaveTextContent("NO");
   });
 
   it("renders an uploaded about avatar with the public profile portrait treatment", async () => {

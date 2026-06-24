@@ -22,27 +22,76 @@ const PUBLIC_THEME_STORAGE_KEY = "tworiver_theme";
 const ADMIN_THEME_STORAGE_KEY = "tworiver_admin_theme";
 type AdminAuthStatus = "unknown" | "checking" | "allowed" | "denied";
 
-function lazyNamed<TProps>(loader: () => Promise<Record<string, unknown>>, name: string) {
-  return lazy(async () => ({ default: (await loader())[name] as ComponentType<TProps> }));
+function createRouteModuleLoader<TModule extends object>(loader: () => Promise<TModule>) {
+  let modulePromise: Promise<TModule> | null = null;
+  return () => {
+    modulePromise ??= loader().catch((error: unknown) => {
+      modulePromise = null;
+      throw error;
+    });
+    return modulePromise;
+  };
 }
 
-const HomePage = lazyNamed<{ locale: Locale }>(() => import("./pages/HomePage"), "HomePage");
-const PostPage = lazyNamed<{ locale: Locale }>(() => import("./pages/PostPage"), "PostPage");
-const CategoryListPage = lazyNamed<{ locale: Locale }>(() => import("./pages/TaxonomyPages"), "CategoryListPage");
-const CategoryDetailPage = lazyNamed<{ locale: Locale }>(() => import("./pages/TaxonomyPages"), "CategoryDetailPage");
-const TagListPage = lazyNamed<{ locale: Locale }>(() => import("./pages/TaxonomyPages"), "TagListPage");
-const TagDetailPage = lazyNamed<{ locale: Locale }>(() => import("./pages/TaxonomyPages"), "TagDetailPage");
-const AboutPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AboutPage"), "AboutPage");
-const LoginPage = lazyNamed<{ locale: Locale }>(() => import("./pages/LoginPage"), "LoginPage");
-const NotFoundPage = lazyNamed<{ locale: Locale }>(() => import("./pages/NotFoundPage"), "NotFoundPage");
-const AdminAboutPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminAboutPage"), "AdminAboutPage");
-const AdminEditorPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminEditorPage"), "AdminEditorPage");
-const AdminPostsPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminPostsPage"), "AdminPostsPage");
-const AdminResourcesPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminResourcesPage"), "AdminResourcesPage");
+function lazyNamed<TProps>(loader: () => Promise<object>, name: string) {
+  return lazy(async () => {
+    const module = (await loader()) as Record<string, ComponentType<TProps>>;
+    const component = module[name];
+    if (!component) {
+      throw new Error(`Route module is missing export "${name}".`);
+    }
+
+    return { default: component };
+  });
+}
+
+const loadHomePage = createRouteModuleLoader(() => import("./pages/HomePage"));
+const loadPostPage = createRouteModuleLoader(() => import("./pages/PostPage"));
+const loadTaxonomyPages = createRouteModuleLoader(() => import("./pages/TaxonomyPages"));
+const loadAboutPage = createRouteModuleLoader(() => import("./pages/AboutPage"));
+const loadLoginPage = createRouteModuleLoader(() => import("./pages/LoginPage"));
+const loadNotFoundPage = createRouteModuleLoader(() => import("./pages/NotFoundPage"));
+const loadAdminAboutPage = createRouteModuleLoader(() => import("./pages/AdminAboutPage"));
+const loadAdminEditorPage = createRouteModuleLoader(() => import("./pages/AdminEditorPage"));
+const loadAdminPostsPage = createRouteModuleLoader(() => import("./pages/AdminPostsPage"));
+const loadAdminResourcesPage = createRouteModuleLoader(() => import("./pages/AdminResourcesPage"));
+const loadAdminTaxonomyPage = createRouteModuleLoader(() => import("./pages/AdminTaxonomyPage"));
+
+const HomePage = lazyNamed<{ locale: Locale }>(loadHomePage, "HomePage");
+const PostPage = lazyNamed<{ locale: Locale }>(loadPostPage, "PostPage");
+const CategoryListPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "CategoryListPage");
+const CategoryDetailPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "CategoryDetailPage");
+const TagListPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "TagListPage");
+const TagDetailPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "TagDetailPage");
+const AboutPage = lazyNamed<{ locale: Locale }>(loadAboutPage, "AboutPage");
+const LoginPage = lazyNamed<{ locale: Locale }>(loadLoginPage, "LoginPage");
+const NotFoundPage = lazyNamed<{ locale: Locale }>(loadNotFoundPage, "NotFoundPage");
+const AdminAboutPage = lazyNamed<{ locale: Locale }>(loadAdminAboutPage, "AdminAboutPage");
+const AdminEditorPage = lazyNamed<{ locale: Locale }>(loadAdminEditorPage, "AdminEditorPage");
+const AdminPostsPage = lazyNamed<{ locale: Locale }>(loadAdminPostsPage, "AdminPostsPage");
+const AdminResourcesPage = lazyNamed<{ locale: Locale }>(loadAdminResourcesPage, "AdminResourcesPage");
 const AdminTaxonomyPage = lazyNamed<{ kind: "categories" | "tags"; locale: Locale }>(
-  () => import("./pages/AdminTaxonomyPage"),
+  loadAdminTaxonomyPage,
   "AdminTaxonomyPage"
 );
+
+function scheduleIdleTask(task: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (idleWindow.requestIdleCallback && idleWindow.cancelIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(task, { timeout: 2_500 });
+    return () => idleWindow.cancelIdleCallback?.(handle);
+  }
+
+  const handle = globalThis.setTimeout(task, 1_200);
+  return () => globalThis.clearTimeout(handle);
+}
 
 function getInitialLocale(storageKey: string): Locale {
   if (typeof window === "undefined") {
@@ -113,11 +162,41 @@ export function App() {
   const isAdminRoute = location.pathname.startsWith("/admin");
   const locale = isAdminRoute ? adminLocale : publicLocale;
   const theme = isAdminRoute ? adminTheme : publicTheme;
-  const routeTransitionKey = `${isAdminRoute ? "admin" : "public"}:${location.pathname}${location.search}`;
 
   useEffect(() => {
     document.documentElement.lang = getHtmlLang(locale);
   }, [locale]);
+
+  useEffect(
+    () =>
+      scheduleIdleTask(() => {
+        void Promise.all([
+          loadHomePage(),
+          loadPostPage(),
+          loadTaxonomyPages(),
+          loadAboutPage(),
+          loadNotFoundPage()
+        ]);
+      }),
+    []
+  );
+
+  useEffect(() => {
+    if (!isAdminRoute) {
+      return undefined;
+    }
+
+    return scheduleIdleTask(() => {
+      void Promise.all([
+        loadLoginPage(),
+        loadAdminPostsPage(),
+        loadAdminResourcesPage(),
+        loadAdminTaxonomyPage(),
+        loadAdminAboutPage(),
+        loadAdminEditorPage()
+      ]);
+    });
+  }, [isAdminRoute]);
 
   const verifyAdminSession = useCallback(() => {
     if (adminAuthRequestRef.current) {
@@ -169,6 +248,57 @@ export function App() {
     navigate("/admin/login", { replace: true });
   }
 
+  function handleRouteIntent(pathname: string) {
+    if (pathname === "/") {
+      void loadHomePage();
+      return;
+    }
+
+    if (pathname === "/about") {
+      void loadAboutPage();
+      return;
+    }
+
+    if (pathname === "/categories" || pathname.startsWith("/categories/")) {
+      void loadTaxonomyPages();
+      return;
+    }
+
+    if (pathname === "/tags" || pathname.startsWith("/tags/")) {
+      void loadTaxonomyPages();
+      return;
+    }
+
+    if (pathname.startsWith("/posts/")) {
+      void loadPostPage();
+      return;
+    }
+
+    if (pathname === "/admin/login") {
+      void loadLoginPage();
+      return;
+    }
+
+    if (pathname === "/admin/posts" || pathname.startsWith("/admin/posts/")) {
+      void (pathname === "/admin/posts" ? loadAdminPostsPage() : loadAdminEditorPage());
+      return;
+    }
+
+    if (pathname === "/admin/resources") {
+      void loadAdminResourcesPage();
+      return;
+    }
+
+    if (pathname === "/admin/categories" || pathname === "/admin/tags") {
+      void loadAdminTaxonomyPage();
+      return;
+    }
+
+    if (pathname === "/admin/about") {
+      void loadAdminAboutPage();
+    }
+  }
+
   function requireAdmin(children: ReactNode) {
     return (
       <RequireAdmin authStatus={adminAuthStatus} verifyAdminSession={verifyAdminSession}>
@@ -185,10 +315,10 @@ export function App() {
       onLogout={() => void handleLogout()}
       onLocaleChange={isAdminRoute ? handleAdminLocaleChange : handlePublicLocaleChange}
       onThemeChange={isAdminRoute ? handleAdminThemeChange : handlePublicThemeChange}
+      onRouteIntent={handleRouteIntent}
     >
       <div
         className={`route-transition ${isAdminRoute ? "route-transition--admin" : "route-transition--public"}`}
-        key={routeTransitionKey}
       >
         <Suspense fallback={<LoadingSection />}>
           <Routes location={location}>

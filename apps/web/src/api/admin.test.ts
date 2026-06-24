@@ -155,4 +155,50 @@ describe("apiRequest", () => {
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.signal).toBe(controller.signal);
   });
+
+  it("deduplicates simultaneous cacheable public GET requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ value: "shared" }), {
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [first, second] = await Promise.all([
+      apiRequest<{ value: string }>("/api/cache-dedupe"),
+      apiRequest<{ value: string }>("/api/cache-dedupe")
+    ]);
+
+    expect(first).toEqual({ value: "shared" });
+    expect(second).toEqual({ value: "shared" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears cached public GET responses after state-changing requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: "before" }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ value: "after" }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiRequest<{ value: string }>("/api/cache-invalidation")).resolves.toEqual({ value: "before" });
+    await expect(apiRequest<{ value: string }>("/api/cache-invalidation")).resolves.toEqual({ value: "before" });
+    await apiRequest<{ ok: true }>("/api/admin/posts", { method: "POST", body: JSON.stringify({}) });
+    await expect(apiRequest<{ value: string }>("/api/cache-invalidation")).resolves.toEqual({ value: "after" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
