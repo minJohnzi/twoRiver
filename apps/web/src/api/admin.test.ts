@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiRequest } from "./client";
-import { uploadAdminAboutAvatar, uploadAdminPostImage } from "./admin";
+import {
+  deleteAdminResource,
+  moveAdminResource,
+  uploadAdminAboutAvatar,
+  uploadAdminPostImage,
+  uploadAdminResource
+} from "./admin";
 
 describe("admin upload API", () => {
   afterEach(() => {
@@ -51,6 +57,82 @@ describe("admin upload API", () => {
     expect(body.get("file")).toBe(file);
     expect(body.has("postUid")).toBe(false);
     expect(headers.has("Content-Type")).toBe(false);
+  });
+
+  it("posts managed resource uploads as FormData with a target folder", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          resource: {
+            kind: "asset",
+            url: "/uploads/resources/general/asset.png",
+            relativePath: "resources/general/asset.png",
+            filename: "asset.png",
+            directory: "resources/general",
+            folder: "general",
+            sizeBytes: 11,
+            updatedAt: "2026-06-24T00:00:00.000Z",
+            contentType: "image/png",
+            postUid: null
+          }
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["image-bytes"], "asset.png", { type: "image/png" });
+    await uploadAdminResource({ file, folder: "general" });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    const body = init.body as FormData;
+
+    expect(init.method).toBe("POST");
+    expect(body.get("folder")).toBe("general");
+    expect(body.get("file")).toBe(file);
+    expect(headers.has("Content-Type")).toBe(false);
+  });
+
+  it("moves and deletes managed resources with JSON bodies", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            resource: {
+              kind: "asset",
+              url: "/uploads/resources/archive/asset.png",
+              relativePath: "resources/archive/asset.png",
+              filename: "asset.png",
+              directory: "resources/archive",
+              folder: "archive",
+              sizeBytes: 11,
+              updatedAt: "2026-06-24T00:00:00.000Z",
+              contentType: "image/png",
+              postUid: null
+            }
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await moveAdminResource({ url: "/uploads/resources/general/asset.png", folder: "archive" });
+    await deleteAdminResource("/uploads/resources/archive/asset.png");
+
+    const [, moveInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, deleteInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+
+    expect(moveInit.method).toBe("PUT");
+    expect(moveInit.body).toBe(JSON.stringify({ url: "/uploads/resources/general/asset.png", folder: "archive" }));
+    expect(deleteInit.method).toBe("DELETE");
+    expect(deleteInit.body).toBe(JSON.stringify({ url: "/uploads/resources/archive/asset.png" }));
   });
 });
 

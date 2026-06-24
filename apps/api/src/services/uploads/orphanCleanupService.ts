@@ -7,6 +7,7 @@ import { getUploadsRoot } from "./uploadPaths.js";
 
 const PUBLIC_UPLOAD_PREFIX = "/uploads/";
 const UPLOAD_URL_PATTERN = /\/uploads\/[^\s"'`)<>]+/g;
+const MANAGED_RESOURCE_PREFIX = "resources/";
 
 export interface CleanupUploadsOptions {
   dryRun?: boolean;
@@ -67,6 +68,11 @@ function publicUrlToRelativePath(url: string): string | undefined {
 function pathToPublicUrl(uploadsRoot: string, filePath: string): string {
   const relativePath = path.relative(uploadsRoot, filePath).split(path.sep).join("/");
   return `/uploads/${relativePath}`;
+}
+
+function isManagedResourceFile(uploadsRoot: string, filePath: string): boolean {
+  const relativePath = path.relative(uploadsRoot, filePath).split(path.sep).join("/");
+  return relativePath.startsWith(MANAGED_RESOURCE_PREFIX);
 }
 
 async function walkFiles(directory: string): Promise<string[]> {
@@ -152,6 +158,11 @@ export async function cleanupOrphanUploads(
     }
 
     const publicUrl = pathToPublicUrl(uploadsRoot, filePath);
+    if (isManagedResourceFile(uploadsRoot, filePath)) {
+      retained.push(publicUrl);
+      continue;
+    }
+
     if (referencedPaths.has(normalizeFileKey(filePath))) {
       retained.push(publicUrl);
       continue;

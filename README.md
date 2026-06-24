@@ -8,7 +8,7 @@ TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前
 - 公开博客页面包含首页、文章详情、分类、标签、关于页、Markdown 渲染和代码高亮
 - 管理员登录使用 HTTP-only session cookie 保护，并对后台写操作校验 CSRF token
 - 后台文章编辑器支持草稿/发布状态、分类、标签分配、Markdown 预览和 AI 辅助草稿
-- 支持在文章 Markdown 中上传图片，也支持上传关于页头像，文件存储在数据库目录下
+- 支持在文章 Markdown 中上传图片、上传关于页头像，并通过后台资源管理整理可公开访问的资源文件
 - 前后端共享 Zod schema，保证类型一致
 - 提供 SQLite 迁移和管理员初始化脚本
 - 可选 DeepSeek 兼容 AI 服务，用于摘要、标签和翻译草稿辅助
@@ -99,7 +99,7 @@ pnpm dev
 
 如果通过 Nginx 做同源生产部署，不要设置 `VITE_API_BASE_URL`；前端应直接请求同域下的 `/api/...`。
 
-上传图片存储在 `<database-dir>/uploads/` 下，其中 `<database-dir>` 是 `DATABASE_PATH` 所在目录。备份时需要同时备份 SQLite 数据库和 `uploads/` 目录。
+上传图片和资源文件存储在 `<database-dir>/uploads/` 下，其中 `<database-dir>` 是 `DATABASE_PATH` 所在目录。备份时需要同时备份 SQLite 数据库和 `uploads/` 目录。
 
 更多运行、备份和排障建议见 [docs/operations.md](docs/operations.md)。
 
@@ -180,6 +180,10 @@ bash -n scripts/deploy-update.sh
 - `DELETE /api/admin/posts/:id`
 - `POST /api/admin/uploads/images`
 - `POST /api/admin/uploads/about-avatar`
+- `GET /api/admin/resources`
+- `POST /api/admin/resources`
+- `PUT /api/admin/resources`
+- `DELETE /api/admin/resources`
 - `GET /api/admin/categories`
 - `POST /api/admin/categories`
 - `PUT /api/admin/categories/:id`
@@ -218,6 +222,12 @@ bash -n scripts/deploy-update.sh
 
 关于页头像通过独立上传接口保存到 `<database-dir>/uploads/images/about/`。替换头像后，建议在定期巡检时清理不再被引用的旧头像文件。
 
+## 资源管理
+
+后台资源管理页位于 `/admin/resources`，用于集中查看文章插图、关于页头像和手动上传的资源文件。手动上传的资源保存到 `<database-dir>/uploads/resources/<folder>/`，支持 `png` / `jpg` / `jpeg` / `webp` / `gif` / `pdf` / `txt` / `md` / `json` / `woff` / `woff2`，单文件大小限制为 5MB。
+
+资源文件通过 `/uploads/...` 对外公开访问，适合放可公开下载或可插入 Markdown 的素材；不要把私密文件上传到资源管理。上传清理脚本会保留 `uploads/resources/` 下的手动管理资源，删除资源请使用后台资源管理页。
+
 ## 部署
 
 文档入口见 [docs/README.md](docs/README.md)。Ubuntu 部署流程见 [docs/deployment/ubuntu.md](docs/deployment/ubuntu.md)，内容包括：
@@ -227,6 +237,6 @@ bash -n scripts/deploy-update.sh
 - 首次交互式部署脚本和可复用更新脚本
 - GoDaddy DNS 指向 Aliyun ECS 公网 IP
 - 使用 Let's Encrypt 免费 HTTPS 证书
-- SQLite 和上传图片存储在部署项目的数据目录下
+- SQLite、上传图片和资源文件存储在部署项目的数据目录下
 
 历史计划文档不再提交到仓库；本地生成的 `docs/superpowers/` 已加入 `.gitignore`。

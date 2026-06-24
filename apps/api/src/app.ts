@@ -9,6 +9,7 @@ import authPlugin from "./plugins/auth.js";
 import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
+import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
@@ -114,6 +115,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(adminAboutRoutes);
   app.register(adminCategoryRoutes);
   app.register(adminPostRoutes, { config });
+  app.register(adminResourceRoutes, { config });
   app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
 

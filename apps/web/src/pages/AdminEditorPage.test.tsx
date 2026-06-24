@@ -89,6 +89,10 @@ async function loadedMarkdownTextarea() {
 }
 
 describe("MarkdownPreview", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("renders headings and fenced code blocks", () => {
     const { container } = render(<MarkdownPreview markdown={"# Title\n\n```ts\nconst value = 1;\n```"} />);
 
@@ -139,6 +143,35 @@ describe("MarkdownPreview", () => {
     const { container } = render(<MarkdownPreview markdown="![图片](/uploads/images/posts/p_111/photo.png)" />);
 
     expect(container.querySelector("img")).toHaveAttribute("src", "http://localhost:4000/uploads/images/posts/p_111/photo.png");
+  });
+
+  it("opens markdown images in a dismissible preview", () => {
+    render(<MarkdownPreview markdown="![Diagram](/uploads/images/posts/p_111/diagram.png)" />);
+
+    const imageButton = screen.getByRole("button", { name: "Open image preview: Diagram" });
+    expect(imageButton).toHaveClass("markdown-image-button");
+    expect(within(imageButton).getByRole("img", { name: "Diagram" })).toHaveAttribute(
+      "src",
+      "http://localhost:4000/uploads/images/posts/p_111/diagram.png"
+    );
+
+    fireEvent.click(imageButton);
+
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("img", { name: "Diagram" })).toHaveAttribute(
+      "src",
+      "http://localhost:4000/uploads/images/posts/p_111/diagram.png"
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close image preview" }));
+    expect(screen.queryByRole("dialog", { name: "Image preview" })).not.toBeInTheDocument();
+  });
+
+  it("keeps linked markdown images as links instead of preview buttons", () => {
+    render(<MarkdownPreview markdown="[![Linked image](/uploads/images/posts/p_111/link.png)](/posts/demo)" />);
+
+    expect(screen.queryByRole("button", { name: /Open image preview/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Linked image" })).toHaveAttribute("href", "/posts/demo");
   });
 
   it("wraps tables for responsive markdown rendering", () => {

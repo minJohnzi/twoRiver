@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { fetchAdminCategories, fetchAdminPosts } from "./api/admin";
+import { fetchAdminCategories, fetchAdminPosts, fetchAdminResources } from "./api/admin";
 import { fetchCurrentUser, logout } from "./api/auth";
 import {
   fetchCategories,
@@ -23,6 +23,10 @@ vi.mock("./api/admin", () => ({
   fetchAdminCategories: vi.fn(),
   fetchAdminTags: vi.fn(),
   fetchAdminAboutProfile: vi.fn(),
+  fetchAdminResources: vi.fn(),
+  uploadAdminResource: vi.fn(),
+  moveAdminResource: vi.fn(),
+  deleteAdminResource: vi.fn(),
   updateAdminAboutProfile: vi.fn(),
   createAdminCategory: vi.fn(),
   updateAdminCategory: vi.fn(),
@@ -50,6 +54,7 @@ vi.mock("./api/posts", () => ({
 const mockedFetchCurrentUser = vi.mocked(fetchCurrentUser);
 const mockedFetchAdminCategories = vi.mocked(fetchAdminCategories);
 const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
+const mockedFetchAdminResources = vi.mocked(fetchAdminResources);
 const mockedLogout = vi.mocked(logout);
 const mockedFetchPosts = vi.mocked(fetchPosts);
 const mockedFetchPost = vi.mocked(fetchPost);
@@ -144,6 +149,64 @@ describe("admin route protection", () => {
     expect(window.localStorage.getItem("tworiver_admin_locale")).toBe("en");
   });
 
+  it("reads public and admin theme preferences independently", async () => {
+    window.localStorage.setItem("tworiver_theme", "light");
+    window.localStorage.setItem("tworiver_admin_theme", "dark");
+
+    const { container, unmount } = render(
+      <MemoryRouter initialEntries={["/admin/login"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "Switch to light theme" })).toBeInTheDocument();
+    expect(container.querySelector(".app-shell")).toHaveAttribute("data-theme", "dark");
+
+    unmount();
+    mockedFetchPosts.mockResolvedValue({ posts: [], total: 0, page: 1, limit: 20 });
+    mockedFetchTags.mockResolvedValue({ tags: [] });
+
+    const publicRender = render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+    expect(publicRender.container.querySelector(".app-shell")).toHaveAttribute("data-theme", "light");
+  });
+
+  it("persists public and admin theme changes independently", async () => {
+    window.localStorage.setItem("tworiver_theme", "dark");
+    window.localStorage.setItem("tworiver_admin_theme", "dark");
+
+    const { container, unmount } = render(
+      <MemoryRouter initialEntries={["/admin/login"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch to light theme" }));
+    expect(window.localStorage.getItem("tworiver_admin_theme")).toBe("light");
+    expect(window.localStorage.getItem("tworiver_theme")).toBe("dark");
+    expect(container.querySelector(".app-shell")).toHaveAttribute("data-theme", "light");
+
+    unmount();
+    mockedFetchPosts.mockResolvedValue({ posts: [], total: 0, page: 1, limit: 20 });
+    mockedFetchTags.mockResolvedValue({ tags: [] });
+
+    const publicRender = render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Switch to light theme" }));
+    expect(window.localStorage.getItem("tworiver_theme")).toBe("light");
+    expect(window.localStorage.getItem("tworiver_admin_theme")).toBe("light");
+    expect(publicRender.container.querySelector(".app-shell")).toHaveAttribute("data-theme", "light");
+  });
+
   it("shows a logout entry for authenticated admins and clears the session", async () => {
     mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
     mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
@@ -176,6 +239,37 @@ describe("admin route protection", () => {
 
     await screen.findByRole("heading", { name: "分类管理" });
     expect(mockedFetchCurrentUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the admin resource manager from the sidebar route", async () => {
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminResources.mockResolvedValue({
+      resources: [
+        {
+          kind: "post-image",
+          url: "/uploads/images/posts/p_11111111-1111-4111-8111-111111111111/photo.png",
+          relativePath: "images/posts/p_11111111-1111-4111-8111-111111111111/photo.png",
+          filename: "photo.png",
+          directory: "images/posts/p_11111111-1111-4111-8111-111111111111",
+          folder: "images/posts/p_11111111-1111-4111-8111-111111111111",
+          sizeBytes: 2048,
+          updatedAt: "2026-06-24T06:00:00.000Z",
+          contentType: "image/png",
+          postUid: "p_11111111-1111-4111-8111-111111111111"
+        }
+      ]
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/admin/resources"]}>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("heading", { name: "资源管理" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "资源管理" })).toHaveAttribute("href", "/admin/resources");
+    expect(await screen.findAllByText("photo.png")).toHaveLength(2);
+    expect(mockedFetchAdminResources).toHaveBeenCalledTimes(1);
   });
 });
 

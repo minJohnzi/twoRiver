@@ -16,7 +16,7 @@
     "@fontsource-variable/playfair-display": "^5.2.8",
     "@iconify/react": "^5.2.1",
     "@tworiver/shared": "workspace:*",
-    "dompurify": "^3.4.8",
+    "dompurify": "^3.4.11",
     "highlight.js": "^11.11.1",
     "marked": "^15.0.12",
     "react": "^19.1.0",

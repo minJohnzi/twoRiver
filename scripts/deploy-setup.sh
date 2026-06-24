@@ -316,7 +316,7 @@ write_nginx_site() {
 server {
     listen 80;
     server_name $server_names;
-    client_max_body_size 5m;
+    client_max_body_size 10m;
 
     root $PROJECT_DIR/apps/web/dist;
     index index.html;

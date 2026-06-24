@@ -32,7 +32,7 @@ test("admin can publish, hide drafts, delete published content, and logout", asy
   await page.getByLabel(/标签|Tags/).fill(`e2e-${suffix}`);
   await page.getByLabel(/标题|Title/).fill(publishedTitle);
   await page.getByLabel("Markdown body").fill(`# ${publishedTitle}\n\nPublished content.`);
-  await page.getByRole("button", { name: /发布|Publish/ }).click();
+  await page.locator(".editor-actions").getByRole("button", { name: /^(发布|Publish)$/ }).click();
   await expect(page.getByRole("heading", { name: /编辑文章|Edit post/ })).toBeVisible();
 
   await page.goto("/");
@@ -50,15 +50,19 @@ test("admin can publish, hide drafts, delete published content, and logout", asy
 
   await page.goto(`/admin/posts`);
   await page.getByRole("link", { name: new RegExp(publishedSlug) }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: /删除|Delete/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /确认删除|Delete/ }).click();
   await expect(page.getByRole("heading", { name: /发布控制台|Publishing console/ })).toBeVisible();
 
   await page.goto("/");
   await expect(page.getByRole("link", { name: publishedTitle })).toHaveCount(0);
 
   await page.goto("/admin/posts");
-  await page.getByRole("button", { name: /logout/i }).click();
+  const menuButton = page.getByRole("button", { name: /打开后台导航|Open admin navigation/ });
+  if (await menuButton.isVisible()) {
+    await menuButton.click();
+  }
+  await page.getByRole("button", { name: /退出登录|Log out|Logout/i }).click();
   await expect(page.getByRole("heading", { name: /进入写作中控室|Enter the writing cockpit/ })).toBeVisible();
 
   await page.goto("/admin/posts");

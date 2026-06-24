@@ -18,6 +18,8 @@ const PUBLIC_LOCALE_STORAGE_KEY = "tworiver_locale";
 const ADMIN_LOCALE_STORAGE_KEY = "tworiver_admin_locale";
 type Theme = "dark" | "light";
 const DEFAULT_THEME: Theme = "dark";
+const PUBLIC_THEME_STORAGE_KEY = "tworiver_theme";
+const ADMIN_THEME_STORAGE_KEY = "tworiver_admin_theme";
 type AdminAuthStatus = "unknown" | "checking" | "allowed" | "denied";
 
 function lazyNamed<TProps>(loader: () => Promise<Record<string, unknown>>, name: string) {
@@ -36,6 +38,7 @@ const NotFoundPage = lazyNamed<{ locale: Locale }>(() => import("./pages/NotFoun
 const AdminAboutPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminAboutPage"), "AdminAboutPage");
 const AdminEditorPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminEditorPage"), "AdminEditorPage");
 const AdminPostsPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminPostsPage"), "AdminPostsPage");
+const AdminResourcesPage = lazyNamed<{ locale: Locale }>(() => import("./pages/AdminResourcesPage"), "AdminResourcesPage");
 const AdminTaxonomyPage = lazyNamed<{ kind: "categories" | "tags"; locale: Locale }>(
   () => import("./pages/AdminTaxonomyPage"),
   "AdminTaxonomyPage"
@@ -50,12 +53,12 @@ function getInitialLocale(storageKey: string): Locale {
   return savedLocale === "en" || savedLocale === "zh" ? savedLocale : DEFAULT_LOCALE;
 }
 
-function getInitialTheme(): Theme {
+function getInitialTheme(storageKey: string): Theme {
   if (typeof window === "undefined") {
     return DEFAULT_THEME;
   }
 
-  const savedTheme = window.localStorage.getItem("tworiver_theme");
+  const savedTheme = window.localStorage.getItem(storageKey);
   return savedTheme === "light" || savedTheme === "dark" ? savedTheme : DEFAULT_THEME;
 }
 
@@ -100,7 +103,8 @@ function RequireAdmin({ children, authStatus, verifyAdminSession }: RequireAdmin
 export function App() {
   const [publicLocale, setPublicLocale] = useState<Locale>(() => getInitialLocale(PUBLIC_LOCALE_STORAGE_KEY));
   const [adminLocale, setAdminLocale] = useState<Locale>(() => getInitialLocale(ADMIN_LOCALE_STORAGE_KEY));
-  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const [publicTheme, setPublicTheme] = useState<Theme>(() => getInitialTheme(PUBLIC_THEME_STORAGE_KEY));
+  const [adminTheme, setAdminTheme] = useState<Theme>(() => getInitialTheme(ADMIN_THEME_STORAGE_KEY));
   const [adminUser, setAdminUser] = useState<CurrentUser | null>(null);
   const [adminAuthStatus, setAdminAuthStatus] = useState<AdminAuthStatus>("unknown");
   const adminAuthRequestRef = useRef<Promise<void> | null>(null);
@@ -108,6 +112,8 @@ export function App() {
   const navigate = useNavigate();
   const isAdminRoute = location.pathname.startsWith("/admin");
   const locale = isAdminRoute ? adminLocale : publicLocale;
+  const theme = isAdminRoute ? adminTheme : publicTheme;
+  const routeTransitionKey = `${isAdminRoute ? "admin" : "public"}:${location.pathname}${location.search}`;
 
   useEffect(() => {
     document.documentElement.lang = getHtmlLang(locale);
@@ -146,9 +152,14 @@ export function App() {
     window.localStorage.setItem(ADMIN_LOCALE_STORAGE_KEY, nextLocale);
   }
 
-  function handleThemeChange(nextTheme: Theme) {
-    setTheme(nextTheme);
-    window.localStorage.setItem("tworiver_theme", nextTheme);
+  function handlePublicThemeChange(nextTheme: Theme) {
+    setPublicTheme(nextTheme);
+    window.localStorage.setItem(PUBLIC_THEME_STORAGE_KEY, nextTheme);
+  }
+
+  function handleAdminThemeChange(nextTheme: Theme) {
+    setAdminTheme(nextTheme);
+    window.localStorage.setItem(ADMIN_THEME_STORAGE_KEY, nextTheme);
   }
 
   async function handleLogout() {
@@ -173,27 +184,33 @@ export function App() {
       isAdminAuthenticated={adminUser !== null}
       onLogout={() => void handleLogout()}
       onLocaleChange={isAdminRoute ? handleAdminLocaleChange : handlePublicLocaleChange}
-      onThemeChange={handleThemeChange}
+      onThemeChange={isAdminRoute ? handleAdminThemeChange : handlePublicThemeChange}
     >
-      <Suspense fallback={<LoadingSection />}>
-        <Routes>
-          <Route path="/" element={<HomePage locale={publicLocale} />} />
-          <Route path="/posts/:slug" element={<PostPage locale={publicLocale} />} />
-          <Route path="/categories" element={<CategoryListPage locale={publicLocale} />} />
-          <Route path="/categories/:slug" element={<CategoryDetailPage locale={publicLocale} />} />
-          <Route path="/tags" element={<TagListPage locale={publicLocale} />} />
-          <Route path="/tags/:slug" element={<TagDetailPage locale={publicLocale} />} />
-          <Route path="/about" element={<AboutPage locale={publicLocale} />} />
-          <Route path="/admin/login" element={<LoginPage locale={adminLocale} />} />
-          <Route path="/admin/about" element={requireAdmin(<AdminAboutPage locale={adminLocale} />)} />
-          <Route path="/admin/posts" element={requireAdmin(<AdminPostsPage locale={adminLocale} />)} />
-          <Route path="/admin/posts/new" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
-          <Route path="/admin/posts/:id" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
-          <Route path="/admin/categories" element={requireAdmin(<AdminTaxonomyPage kind="categories" locale={adminLocale} />)} />
-          <Route path="/admin/tags" element={requireAdmin(<AdminTaxonomyPage kind="tags" locale={adminLocale} />)} />
-          <Route path="*" element={<NotFoundPage locale={locale} />} />
-        </Routes>
-      </Suspense>
+      <div
+        className={`route-transition ${isAdminRoute ? "route-transition--admin" : "route-transition--public"}`}
+        key={routeTransitionKey}
+      >
+        <Suspense fallback={<LoadingSection />}>
+          <Routes location={location}>
+            <Route path="/" element={<HomePage locale={publicLocale} />} />
+            <Route path="/posts/:slug" element={<PostPage locale={publicLocale} />} />
+            <Route path="/categories" element={<CategoryListPage locale={publicLocale} />} />
+            <Route path="/categories/:slug" element={<CategoryDetailPage locale={publicLocale} />} />
+            <Route path="/tags" element={<TagListPage locale={publicLocale} />} />
+            <Route path="/tags/:slug" element={<TagDetailPage locale={publicLocale} />} />
+            <Route path="/about" element={<AboutPage locale={publicLocale} />} />
+            <Route path="/admin/login" element={<LoginPage locale={adminLocale} />} />
+            <Route path="/admin/about" element={requireAdmin(<AdminAboutPage locale={adminLocale} />)} />
+            <Route path="/admin/posts" element={requireAdmin(<AdminPostsPage locale={adminLocale} />)} />
+            <Route path="/admin/posts/new" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
+            <Route path="/admin/posts/:id" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
+            <Route path="/admin/resources" element={requireAdmin(<AdminResourcesPage locale={adminLocale} />)} />
+            <Route path="/admin/categories" element={requireAdmin(<AdminTaxonomyPage kind="categories" locale={adminLocale} />)} />
+            <Route path="/admin/tags" element={requireAdmin(<AdminTaxonomyPage kind="tags" locale={adminLocale} />)} />
+            <Route path="*" element={<NotFoundPage locale={locale} />} />
+          </Routes>
+        </Suspense>
+      </div>
     </Layout>
   );
 }

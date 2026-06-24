@@ -12,7 +12,8 @@ import {
   getAboutAvatarDirectory,
   getAboutAvatarPublicUrl,
   getPostImageDirectory,
-  getPostImagePublicUrl
+  getPostImagePublicUrl,
+  getUploadsRoot
 } from "../src/services/uploads/uploadPaths.js";
 
 const tempDirectories: string[] = [];
@@ -116,6 +117,25 @@ describe("upload orphan cleanup", () => {
       ]);
       await expect(fs.access(orphanPostFile)).resolves.toBeUndefined();
       await expect(fs.access(orphanAvatarFile)).resolves.toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retains managed resource library files even when they are not referenced", async () => {
+    const { config, db } = await createTestDatabase();
+
+    try {
+      const resourceFile = path.join(getUploadsRoot(config), "resources", "manuals", "guide.pdf");
+      await writeUploadFile(resourceFile);
+
+      const result = await cleanupOrphanUploads(config, db, { dryRun: false });
+
+      expect(result).toEqual({
+        retained: ["/uploads/resources/manuals/guide.pdf"],
+        removed: []
+      });
+      await expect(fs.access(resourceFile)).resolves.toBeUndefined();
     } finally {
       db.close();
     }

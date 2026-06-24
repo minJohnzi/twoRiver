@@ -99,6 +99,7 @@ async function createPost(app: FastifyInstance, auth: { cookie: string; csrfToke
 
 function multipartBody(input: {
   postUid?: string;
+  fields?: Record<string, string>;
   file?: { fieldname?: string; filename: string; contentType: string; bytes: Buffer };
   fileFirst?: boolean;
 }) {
@@ -113,6 +114,14 @@ function multipartBody(input: {
     push(`--${boundary}\r\n`);
     push('Content-Disposition: form-data; name="postUid"\r\n\r\n');
     push(`${input.postUid}\r\n`);
+  };
+
+  const pushFields = () => {
+    for (const [name, value] of Object.entries(input.fields ?? {})) {
+      push(`--${boundary}\r\n`);
+      push(`Content-Disposition: form-data; name="${name}"\r\n\r\n`);
+      push(`${value}\r\n`);
+    }
   };
 
   const pushFile = () => {
@@ -131,8 +140,10 @@ function multipartBody(input: {
   if (input.fileFirst) {
     pushFile();
     pushPostUid();
+    pushFields();
   } else {
     pushPostUid();
+    pushFields();
     pushFile();
   }
 
@@ -192,6 +203,38 @@ async function uploadAboutAvatar(
   return app.inject({
     method: "POST",
     url: "/api/admin/uploads/about-avatar",
+    headers: {
+      cookie: auth.cookie,
+      "x-csrf-token": auth.csrfToken,
+      "content-type": multipart.contentType
+    },
+    payload: multipart.body
+  });
+}
+
+async function uploadResource(
+  app: FastifyInstance,
+  auth: { cookie: string; csrfToken: string },
+  input: { folder?: string; filename?: string; contentType?: string; bytes?: Buffer; fileFirst?: boolean } = {}
+) {
+  const multipartInput: Parameters<typeof multipartBody>[0] = {
+    file: {
+      filename: input.filename ?? "asset.png",
+      contentType: input.contentType ?? "image/png",
+      bytes: input.bytes ?? pngBytes
+    }
+  };
+  if (input.folder !== undefined) {
+    multipartInput.fields = { folder: input.folder };
+  }
+  if (input.fileFirst !== undefined) {
+    multipartInput.fileFirst = input.fileFirst;
+  }
+  const multipart = multipartBody(multipartInput);
+
+  return app.inject({
+    method: "POST",
+    url: "/api/admin/resources",
     headers: {
       cookie: auth.cookie,
       "x-csrf-token": auth.csrfToken,
@@ -349,6 +392,253 @@ describe("admin image uploads", () => {
       });
       expect(missingCsrfResponse.statusCode).toBe(403);
       expect(missingCsrfResponse.json()).toEqual({ message: "Invalid CSRF token" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("lists uploaded resources for authenticated admins", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createPost(app, auth);
+      const postImageResponse = await uploadImage(app, auth, { postUid: post.uid });
+      const aboutImageResponse = await uploadAboutAvatar(app, auth);
+      expect(postImageResponse.statusCode).toBe(201);
+      expect(aboutImageResponse.statusCode).toBe(201);
+      const postImageBody = postImageResponse.json() as { url: string };
+      const aboutImageBody = aboutImageResponse.json() as { url: string };
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        resources: Array<{
+          kind: string;
+          url: string;
+          relativePath: string;
+          filename: string;
+          directory: string;
+          sizeBytes: number;
+          contentType: string;
+          postUid: string | null;
+        }>;
+      };
+      expect(body.resources).toHaveLength(2);
+      expect(body.resources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "post-image",
+            url: postImageBody.url,
+            directory: `images/posts/${post.uid}`,
+            sizeBytes: pngBytes.length,
+            contentType: "image/png",
+            postUid: post.uid
+          }),
+          expect.objectContaining({
+            kind: "about-image",
+            url: aboutImageBody.url,
+            directory: "images/about",
+            sizeBytes: pngBytes.length,
+            contentType: "image/png",
+            postUid: null
+          })
+        ])
+      );
+      for (const resource of body.resources) {
+        expect(resource.filename).toMatch(/^[0-9a-f-]{36}\.png$/);
+        expect(resource.relativePath).toContain(resource.filename);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("requires authentication before listing uploaded resources", async () => {
+    const app = await createTestApp();
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources"
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ message: "Authentication required" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("uploads managed resources into chosen folders", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await uploadResource(app, auth, { folder: "media/headers", filename: "hero.png", fileFirst: true });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json() as {
+        resource: {
+          kind: string;
+          url: string;
+          relativePath: string;
+          filename: string;
+          directory: string;
+          folder: string;
+          sizeBytes: number;
+          contentType: string;
+          postUid: string | null;
+        };
+      };
+      expect(body.resource).toEqual(
+        expect.objectContaining({
+          kind: "asset",
+          directory: "resources/media/headers",
+          folder: "media/headers",
+          sizeBytes: pngBytes.length,
+          contentType: "image/png",
+          postUid: null
+        })
+      );
+      expect(body.resource.url).toMatch(/^\/uploads\/resources\/media\/headers\/[0-9a-f-]{36}-hero\.png$/);
+      expect(body.resource.relativePath).toBe(`resources/media/headers/${body.resource.filename}`);
+
+      const fileResponse = await app.inject({ method: "GET", url: body.resource.url });
+      expect(fileResponse.statusCode).toBe(200);
+      expect(fileResponse.headers["content-type"]).toContain("image/png");
+      expect(fileResponse.rawPayload).toEqual(pngBytes);
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().resources).toEqual([expect.objectContaining({ url: body.resource.url })]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("moves uploaded resources between folders", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const uploadResponse = await uploadResource(app, auth, { folder: "drafts", filename: "cover.png" });
+      expect(uploadResponse.statusCode).toBe(201);
+      const uploadBody = uploadResponse.json() as { resource: { url: string } };
+
+      const missingCsrfResponse = await app.inject({
+        method: "PUT",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie },
+        payload: { url: uploadBody.resource.url, folder: "published/covers" }
+      });
+      expect(missingCsrfResponse.statusCode).toBe(403);
+
+      const moveResponse = await app.inject({
+        method: "PUT",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url: uploadBody.resource.url, folder: "published/covers" }
+      });
+
+      expect(moveResponse.statusCode).toBe(200);
+      const moveBody = moveResponse.json() as {
+        resource: { url: string; directory: string; folder: string; filename: string };
+      };
+      expect(moveBody.resource).toEqual(
+        expect.objectContaining({
+          directory: "resources/published/covers",
+          folder: "published/covers"
+        })
+      );
+      expect(moveBody.resource.url).toMatch(/^\/uploads\/resources\/published\/covers\/[0-9a-f-]{36}-cover\.png$/);
+
+      const oldFileResponse = await app.inject({ method: "GET", url: uploadBody.resource.url });
+      expect(oldFileResponse.statusCode).toBe(404);
+      const newFileResponse = await app.inject({ method: "GET", url: moveBody.resource.url });
+      expect(newFileResponse.statusCode).toBe(200);
+      expect(newFileResponse.rawPayload).toEqual(pngBytes);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects managed resource folders that escape the upload root", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await uploadResource(app, auth, { folder: "../escape" });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: "Invalid resource folder" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("deletes uploaded resources for authenticated admins", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const uploadResponse = await uploadAboutAvatar(app, auth);
+      expect(uploadResponse.statusCode).toBe(201);
+      const uploadBody = uploadResponse.json() as { url: string };
+      const config = appConfigs.get(app);
+      if (!config) {
+        throw new Error("Expected app config");
+      }
+      const filePath = path.join(getUploadsRoot(config), ...uploadBody.url.slice("/uploads/".length).split("/"));
+
+      await expect(fs.access(filePath)).resolves.toBeUndefined();
+
+      const missingCsrfResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie },
+        payload: { url: uploadBody.url }
+      });
+      expect(missingCsrfResponse.statusCode).toBe(403);
+
+      const deleteResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url: uploadBody.url }
+      });
+
+      expect(deleteResponse.statusCode).toBe(200);
+      expect(deleteResponse.json()).toEqual({ ok: true });
+      await expect(fs.access(filePath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects resource deletion paths outside the upload root", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url: "/uploads/../blog.sqlite" }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: "Invalid upload resource path" });
     } finally {
       await app.close();
     }

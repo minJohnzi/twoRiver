@@ -65,6 +65,50 @@ export function uploadAdminAboutAvatar(file: File) {
   });
 }
 
+export type AdminResourceKind = "post-image" | "about-image" | "asset";
+
+export interface AdminResource {
+  kind: AdminResourceKind;
+  url: string;
+  relativePath: string;
+  filename: string;
+  directory: string;
+  folder: string;
+  sizeBytes: number;
+  updatedAt: string;
+  contentType: string;
+  postUid: string | null;
+}
+
+export function fetchAdminResources(init?: RequestInit) {
+  return apiRequest<{ resources: AdminResource[] }>("/api/admin/resources", init);
+}
+
+export function uploadAdminResource(input: { file: File; folder: string }) {
+  const body = new FormData();
+  body.set("folder", input.folder);
+  body.set("file", input.file);
+
+  return apiRequest<{ resource: AdminResource }>("/api/admin/resources", {
+    method: "POST",
+    body
+  });
+}
+
+export function moveAdminResource(input: { url: string; folder: string }) {
+  return apiRequest<{ resource: AdminResource }>("/api/admin/resources", {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
+export function deleteAdminResource(url: string) {
+  return apiRequest<{ ok: true }>("/api/admin/resources", {
+    method: "DELETE",
+    body: JSON.stringify({ url })
+  });
+}
+
 export interface TranslatePostDraftInput {
   source: Pick<PostTranslation, "locale" | "title" | "summary" | "contentMarkdown">;
   targetLocale: Locale;

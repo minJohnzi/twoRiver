@@ -223,4 +223,4 @@ pnpm --filter @tworiver/api cleanup:uploads
 pnpm --filter @tworiver/api cleanup:uploads -- --delete
 ```
 
-The cleanup keeps upload files referenced by post Markdown or the about avatar URL, removes empty upload subdirectories after deletion, and reports or removes unreferenced files under the configured uploads root.
+The cleanup keeps upload files referenced by post Markdown, the about avatar URL, and manually managed files under `uploads/resources/`. It removes empty upload subdirectories after deletion, and reports or removes unreferenced files elsewhere under the configured uploads root.
