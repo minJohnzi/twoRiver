@@ -151,7 +151,7 @@ export function AdminPostsPage({ locale }: AdminPostsPageProps) {
           counts[post.status] += 1;
           return counts;
         },
-        { draft: 0, hidden: 0, published: 0 }
+        { archived: 0, draft: 0, hidden: 0, published: 0 }
       ),
     [posts]
   );
