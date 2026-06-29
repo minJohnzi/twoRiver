@@ -68,6 +68,7 @@ function enforceAdminParityPostStatus(db: ReturnType<typeof openDatabase>): void
 
   db.exec("PRAGMA foreign_keys = OFF");
   try {
+    db.prepare("DROP TABLE IF EXISTS posts_status_migration").run();
     db.exec(`
       CREATE TABLE posts_status_migration (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
