@@ -57,4 +57,24 @@ describe("loadConfig", () => {
 
     expect(config.DEEPSEEK_API_KEY).toBe("sk-from-process");
   });
+
+  test("requires a dedicated analytics hash secret in production", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "production",
+        SESSION_SECRET: "replace-with-at-least-32-random-characters",
+        ADMIN_PASSWORD: "replace-with-at-least-12",
+        CORS_ALLOWED_ORIGINS: "https://example.com"
+      })
+    ).toThrow("ANALYTICS_HASH_SECRET must be set in production.");
+
+    const config = loadConfig({
+      NODE_ENV: "production",
+      SESSION_SECRET: "replace-with-at-least-32-random-characters",
+      ADMIN_PASSWORD: "replace-with-at-least-12",
+      CORS_ALLOWED_ORIGINS: "https://example.com",
+      ANALYTICS_HASH_SECRET: "analytics-secret-at-least-32-characters"
+    });
+    expect(config.ANALYTICS_HASH_SECRET).toBe("analytics-secret-at-least-32-characters");
+  });
 });

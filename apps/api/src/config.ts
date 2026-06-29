@@ -26,7 +26,8 @@ const ConfigSchema = z.object({
   ADMIN_PASSWORD: z.string().min(12).default(DEFAULT_ADMIN_PASSWORD),
   CORS_ALLOWED_ORIGINS: z.preprocess(parseOriginList, z.array(z.string().url()).default([])),
   DEEPSEEK_API_KEY: z.string().optional(),
-  DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com")
+  DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
+  ANALYTICS_HASH_SECRET: z.string().min(32).optional()
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -107,6 +108,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options: LoadCo
 
     if (config.CORS_ALLOWED_ORIGINS.length === 0) {
       throw new Error("CORS_ALLOWED_ORIGINS must list trusted origins in production.");
+    }
+
+    if (!env.ANALYTICS_HASH_SECRET) {
+      throw new Error("ANALYTICS_HASH_SECRET must be set in production.");
     }
   }
 

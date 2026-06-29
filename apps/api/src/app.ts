@@ -16,6 +16,7 @@ import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
 import { adminSiteSettingsRoutes } from "./routes/adminSiteSettingsRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
+import { analyticsRoutes } from "./routes/analyticsRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { publicContentRoutes } from "./routes/publicContentRoutes.js";
 import { publicRoutes } from "./routes/publicRoutes.js";
@@ -115,6 +116,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
 
   app.register(authPlugin);
   app.register(authRoutes, { config });
+  app.register(analyticsRoutes, { config });
   app.register(publicRoutes);
   app.register(publicContentRoutes);
   app.register(publicAboutRoutes);
