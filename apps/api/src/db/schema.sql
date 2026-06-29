@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   uid TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'hidden', 'archived')),
+  status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'archived')),
   category_id INTEGER,
   published_at TEXT,
   is_pinned INTEGER NOT NULL DEFAULT 0 CHECK (is_pinned IN (0, 1)),

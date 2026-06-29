@@ -644,7 +644,7 @@ describe("admin image uploads", () => {
     }
   });
 
-  test("deleting a post removes its image directory best effort", async () => {
+  test("permanently deleting a post removes its image directory best effort", async () => {
     const app = await createTestApp();
 
     try {
@@ -669,6 +669,17 @@ describe("admin image uploads", () => {
 
       expect(deleteResponse.statusCode).toBe(200);
       expect(deleteResponse.json()).toEqual({ ok: true });
+      expect((await fs.stat(postImageDirectory)).isDirectory()).toBe(true);
+
+      app.db.prepare("UPDATE posts SET deleted_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", post.id);
+      const permanentDeleteResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${post.id}/permanent`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+
+      expect(permanentDeleteResponse.statusCode).toBe(200);
+      expect(permanentDeleteResponse.json()).toEqual({ ok: true });
       await expect(fs.stat(postImageDirectory)).rejects.toMatchObject({ code: "ENOENT" });
       expect((await fs.stat(getUploadsRoot(config))).isDirectory()).toBe(true);
     } finally {

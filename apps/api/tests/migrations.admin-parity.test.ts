@@ -22,9 +22,34 @@ afterEach(() => {
 describe("admin parity migration", () => {
   test("preserves legacy content, converts hidden posts, creates the v2 schema, and stays idempotent", () => {
     const databasePath = createDatabasePath();
-    migrate(databasePath);
-
     const legacyDb = openDatabase(databasePath);
+    legacyDb.exec(`
+      CREATE TABLE posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid TEXT NOT NULL UNIQUE,
+        slug TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'hidden')),
+        category_id INTEGER,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE post_translations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        locale TEXT NOT NULL CHECK (locale IN ('zh', 'en')),
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        content_markdown TEXT NOT NULL DEFAULT '',
+        seo_title TEXT,
+        seo_description TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (post_id, locale),
+        FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+      );
+    `);
     legacyDb
       .prepare(
         `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)

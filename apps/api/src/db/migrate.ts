@@ -54,9 +54,9 @@ function backfillPostUids(db: ReturnType<typeof openDatabase>): void {
   }
 }
 
-function allowAdminParityPostStatus(db: ReturnType<typeof openDatabase>): void {
+function enforceAdminParityPostStatus(db: ReturnType<typeof openDatabase>): void {
   const sql = tableSql(db, "posts");
-  if (!sql || sql.includes("'archived'")) {
+  if (!sql || (sql.includes("'archived'") && !sql.includes("'hidden'"))) {
     return;
   }
 
@@ -73,7 +73,7 @@ function allowAdminParityPostStatus(db: ReturnType<typeof openDatabase>): void {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         uid TEXT NOT NULL UNIQUE,
         slug TEXT NOT NULL UNIQUE,
-        status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'hidden', 'archived')),
+        status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'archived')),
         category_id INTEGER,
         published_at TEXT,
         is_pinned INTEGER NOT NULL DEFAULT 0 CHECK (is_pinned IN (0, 1)),
@@ -90,7 +90,7 @@ function allowAdminParityPostStatus(db: ReturnType<typeof openDatabase>): void {
         is_pinned, is_featured, cover_url, deleted_at, created_at, updated_at
       )
       SELECT
-        id, uid, slug, status, category_id, published_at,
+        id, uid, slug, CASE WHEN status = 'hidden' THEN 'archived' ELSE status END, category_id, published_at,
         is_pinned, is_featured, cover_url, deleted_at, created_at, updated_at
       FROM posts;
 
@@ -127,7 +127,7 @@ function prepareLegacyPostsTable(db: ReturnType<typeof openDatabase>): void {
   if (!postColumns.has("deleted_at")) {
     db.prepare("ALTER TABLE posts ADD COLUMN deleted_at TEXT").run();
   }
-  allowAdminParityPostStatus(db);
+  enforceAdminParityPostStatus(db);
 }
 
 function addColumnIfMissing(

@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import {
+  type BulkPostActionInput,
+  type PostLifecycleInput,
   UpsertPostInputSchema,
   type Category,
   type PostStatus,
   type PostTranslation,
+  type ParsedUpsertPostInput,
   type Tag,
-  type UpsertPostInput
 } from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
 import { normalizeSlug } from "../services/slugService.js";
@@ -18,6 +20,10 @@ export interface PostRecord {
   slug: string;
   status: PostStatus;
   publishedAt: string | null;
+  isPinned: boolean;
+  isFeatured: boolean;
+  coverUrl: string;
+  deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
   category: Category | null;
@@ -39,6 +45,10 @@ interface PostRow {
   status: PostStatus;
   category_id: number | null;
   published_at: string | null;
+  is_pinned: number;
+  is_featured: number;
+  cover_url: string;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +87,18 @@ export class PostSlugConflictError extends Error {
     this.name = "PostSlugConflictError";
   }
 }
+
+export class PostBulkTargetNotFoundError extends Error {
+  constructor() {
+    super("One or more posts were not found");
+    this.name = "PostBulkTargetNotFoundError";
+  }
+}
+
+const POST_COLUMNS = `
+  id, uid, slug, status, category_id, published_at,
+  is_pinned, is_featured, cover_url, deleted_at, created_at, updated_at
+`;
 
 function mapTranslation(row: TranslationRow): PostTranslation {
   return {
@@ -138,6 +160,10 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
     slug: row.slug,
     status: row.status,
     publishedAt: row.published_at,
+    isPinned: row.is_pinned === 1,
+    isFeatured: row.is_featured === 1,
+    coverUrl: row.cover_url,
+    deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     category: categoryRow ? mapCategory(categoryRow) : null,
@@ -206,6 +232,10 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
     slug: row.slug,
     status: row.status,
     publishedAt: row.published_at,
+    isPinned: row.is_pinned === 1,
+    isFeatured: row.is_featured === 1,
+    coverUrl: row.cover_url,
+    deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     category: row.category_id === null ? null : (categoriesById.get(row.category_id) ?? null),
@@ -214,7 +244,7 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
   }));
 }
 
-function replacePostRelations(db: BlogDatabase, postId: number, input: UpsertPostInput, timestamp: string): void {
+function replacePostRelations(db: BlogDatabase, postId: number, input: ParsedUpsertPostInput, timestamp: string): void {
   db.prepare("DELETE FROM post_translations WHERE post_id = ?").run(postId);
   db.prepare("DELETE FROM post_tags WHERE post_id = ?").run(postId);
 
@@ -254,7 +284,11 @@ function replacePostRelations(db: BlogDatabase, postId: number, input: UpsertPos
   }
 }
 
-function validatePostInput(input: UpsertPostInput): void {
+function validatePostInput(input: ParsedUpsertPostInput): void {
+  if (input.status === "hidden") {
+    throw new InvalidPostInputError();
+  }
+
   const locales = new Set<string>();
   for (const translation of input.translations) {
     if (locales.has(translation.locale)) {
@@ -299,10 +333,24 @@ export function createPost(db: BlogDatabase, input: unknown): PostRecord {
     const category = ensureCategory(db, parsed.categorySlug);
     const result = db
       .prepare(
-        `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO posts (
+           uid, slug, status, category_id, published_at,
+           is_pinned, is_featured, cover_url, created_at, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(uid, parsed.slug, parsed.status, category?.id ?? null, parsed.publishedAt, now, now);
+      .run(
+        uid,
+        parsed.slug,
+        parsed.status,
+        category?.id ?? null,
+        parsed.publishedAt,
+        parsed.isPinned ? 1 : 0,
+        parsed.isFeatured ? 1 : 0,
+        parsed.coverUrl,
+        now,
+        now
+      );
 
     const postId = Number(result.lastInsertRowid);
     replacePostRelations(db, postId, parsed, now);
@@ -321,7 +369,7 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
 
   return db.transaction(() => {
     const existing = getPostRowById(db, id);
-    if (!existing) {
+    if (!existing || existing.deleted_at !== null) {
       return undefined;
     }
     validatePostInput(parsed);
@@ -331,28 +379,122 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
 
     const now = new Date().toISOString();
     const category = ensureCategory(db, parsed.categorySlug);
-    db.prepare("UPDATE posts SET slug = ?, status = ?, category_id = ?, published_at = ?, updated_at = ? WHERE id = ?").run(
-      parsed.slug,
-      parsed.status,
-      category?.id ?? null,
-      parsed.publishedAt,
-      now,
-      id
-    );
+    db.prepare(
+      `UPDATE posts
+       SET slug = ?, status = ?, category_id = ?, published_at = ?,
+           is_pinned = ?, is_featured = ?, cover_url = ?, updated_at = ?
+       WHERE id = ? AND deleted_at IS NULL`
+    ).run(
+        parsed.slug,
+        parsed.status,
+        category?.id ?? null,
+        parsed.publishedAt,
+        parsed.isPinned ? 1 : 0,
+        parsed.isFeatured ? 1 : 0,
+        parsed.coverUrl,
+        now,
+        id
+      );
     replacePostRelations(db, id, parsed, now);
 
     return getAdminPostById(db, id);
   })();
 }
 
-export function deletePost(db: BlogDatabase, id: number): boolean {
-  return deletePostWithUid(db, id).deleted;
+export function updatePostLifecycle(
+  db: BlogDatabase,
+  id: number,
+  patch: PostLifecycleInput
+): PostRecord | undefined {
+  const existing = getPostRowById(db, id);
+  if (!existing || existing.deleted_at !== null) {
+    return undefined;
+  }
+
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE posts
+     SET status = ?, is_pinned = ?, is_featured = ?, cover_url = ?, updated_at = ?
+     WHERE id = ? AND deleted_at IS NULL`
+  ).run(
+    patch.status ?? existing.status,
+    (patch.isPinned ?? existing.is_pinned === 1) ? 1 : 0,
+    (patch.isFeatured ?? existing.is_featured === 1) ? 1 : 0,
+    patch.coverUrl ?? existing.cover_url,
+    now,
+    id
+  );
+
+  return getAdminPostById(db, id);
 }
 
-export function deletePostWithUid(db: BlogDatabase, id: number): { deleted: boolean; uid?: string } {
+export function bulkUpdatePosts(db: BlogDatabase, input: BulkPostActionInput): number {
+  const ids = Array.from(new Set(input.ids));
+
+  return db.transaction(() => {
+    const idPlaceholders = placeholders(ids);
+    const statePredicate = input.action === "restore" ? "deleted_at IS NOT NULL" : "deleted_at IS NULL";
+    const found = db
+      .prepare(`SELECT COUNT(*) AS count FROM posts WHERE id IN (${idPlaceholders}) AND ${statePredicate}`)
+      .get(...ids) as { count: number };
+    if (found.count !== ids.length) {
+      throw new PostBulkTargetNotFoundError();
+    }
+
+    const now = new Date().toISOString();
+    if (input.action === "archive") {
+      db.prepare(`UPDATE posts SET status = 'archived', updated_at = ? WHERE id IN (${idPlaceholders})`).run(
+        now,
+        ...ids
+      );
+    } else if (input.action === "trash") {
+      db.prepare(`UPDATE posts SET deleted_at = ?, updated_at = ? WHERE id IN (${idPlaceholders})`).run(
+        now,
+        now,
+        ...ids
+      );
+    } else {
+      db.prepare(`UPDATE posts SET deleted_at = NULL, updated_at = ? WHERE id IN (${idPlaceholders})`).run(
+        now,
+        ...ids
+      );
+    }
+
+    return ids.length;
+  })();
+}
+
+export function trashPost(db: BlogDatabase, id: number, now = new Date()): boolean {
+  const timestamp = now.toISOString();
+  return (
+    db
+      .prepare("UPDATE posts SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+      .run(timestamp, timestamp, id).changes > 0
+  );
+}
+
+export function restorePost(db: BlogDatabase, id: number): boolean {
+  const now = new Date().toISOString();
+  return (
+    db
+      .prepare("UPDATE posts SET deleted_at = NULL, updated_at = ? WHERE id = ? AND deleted_at IS NOT NULL")
+      .run(now, id).changes > 0
+  );
+}
+
+export function permanentlyDeletePost(
+  db: BlogDatabase,
+  id: number,
+  now = new Date()
+): { deleted: boolean; uid?: string } {
   const row = getPostRowById(db, id);
   if (!row) {
     return { deleted: false };
+  }
+
+  const retentionCutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+  if (row.deleted_at === null || Date.parse(row.deleted_at) > retentionCutoff) {
+    return { deleted: false, uid: row.uid };
   }
 
   const result = db.prepare("DELETE FROM posts WHERE id = ?").run(id);
@@ -367,10 +509,10 @@ export function getPostIdByUid(db: BlogDatabase, uid: string): number | undefine
 export function listPublicPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT ${POST_COLUMNS}
        FROM posts
-       WHERE status = 'published'
-       ORDER BY published_at DESC, created_at DESC`
+       WHERE status = 'published' AND deleted_at IS NULL
+       ORDER BY is_pinned DESC, published_at DESC, id DESC`
     )
     .all() as PostRow[];
 
@@ -381,13 +523,17 @@ export function listPublicPostsPage(db: BlogDatabase, page: number, limit: numbe
   const safePage = Math.max(1, Math.floor(page));
   const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
   const offset = (safePage - 1) * safeLimit;
-  const total = (db.prepare("SELECT COUNT(*) AS count FROM posts WHERE status = 'published'").get() as { count: number }).count;
+  const total = (
+    db.prepare("SELECT COUNT(*) AS count FROM posts WHERE status = 'published' AND deleted_at IS NULL").get() as {
+      count: number;
+    }
+  ).count;
   const rows = db
     .prepare(
-      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT ${POST_COLUMNS}
        FROM posts
-       WHERE status = 'published'
-       ORDER BY published_at DESC, created_at DESC
+       WHERE status = 'published' AND deleted_at IS NULL
+       ORDER BY is_pinned DESC, published_at DESC, id DESC
        LIMIT ? OFFSET ?`
     )
     .all(safeLimit, offset) as PostRow[];
@@ -403,11 +549,13 @@ export function listPublicPostsPage(db: BlogDatabase, page: number, limit: numbe
 export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT p.id, p.uid, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+      `SELECT
+         p.id, p.uid, p.slug, p.status, p.category_id, p.published_at,
+         p.is_pinned, p.is_featured, p.cover_url, p.deleted_at, p.created_at, p.updated_at
        FROM posts p
        INNER JOIN categories c ON c.id = p.category_id
-       WHERE p.status = 'published' AND c.slug = ?
-       ORDER BY p.published_at DESC, p.created_at DESC`
+       WHERE p.status = 'published' AND p.deleted_at IS NULL AND c.slug = ?
+       ORDER BY p.is_pinned DESC, p.published_at DESC, p.id DESC`
     )
     .all(slug) as PostRow[];
 
@@ -417,12 +565,14 @@ export function listPublicPostsByCategorySlug(db: BlogDatabase, slug: string): P
 export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT p.id, p.uid, p.slug, p.status, p.category_id, p.published_at, p.created_at, p.updated_at
+      `SELECT
+         p.id, p.uid, p.slug, p.status, p.category_id, p.published_at,
+         p.is_pinned, p.is_featured, p.cover_url, p.deleted_at, p.created_at, p.updated_at
        FROM posts p
        INNER JOIN post_tags pt ON pt.post_id = p.id
        INNER JOIN tags t ON t.id = pt.tag_id
-       WHERE p.status = 'published' AND t.slug = ?
-       ORDER BY p.published_at DESC, p.created_at DESC`
+       WHERE p.status = 'published' AND p.deleted_at IS NULL AND t.slug = ?
+       ORDER BY p.is_pinned DESC, p.published_at DESC, p.id DESC`
     )
     .all(slug) as PostRow[];
 
@@ -432,9 +582,9 @@ export function listPublicPostsByTagSlug(db: BlogDatabase, slug: string): PostRe
 export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord | undefined {
   const row = db
     .prepare(
-      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT ${POST_COLUMNS}
        FROM posts
-       WHERE slug = ? AND status = 'published'`
+       WHERE slug = ? AND status = 'published' AND deleted_at IS NULL`
     )
     .get(slug) as PostRow | undefined;
 
@@ -444,9 +594,23 @@ export function getPublicPostBySlug(db: BlogDatabase, slug: string): PostRecord 
 export function listAdminPosts(db: BlogDatabase): PostRecord[] {
   const rows = db
     .prepare(
-      `SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at
+      `SELECT ${POST_COLUMNS}
        FROM posts
+       WHERE deleted_at IS NULL
        ORDER BY updated_at DESC`
+    )
+    .all() as PostRow[];
+
+  return hydratePosts(db, rows);
+}
+
+export function listTrashedPosts(db: BlogDatabase): PostRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT ${POST_COLUMNS}
+       FROM posts
+       WHERE deleted_at IS NOT NULL
+       ORDER BY deleted_at DESC, id DESC`
     )
     .all() as PostRow[];
 
@@ -460,6 +624,6 @@ export function getAdminPostById(db: BlogDatabase, id: number): PostRecord | und
 
 function getPostRowById(db: BlogDatabase, id: number): PostRow | undefined {
   return db
-    .prepare("SELECT id, uid, slug, status, category_id, published_at, created_at, updated_at FROM posts WHERE id = ?")
+    .prepare(`SELECT ${POST_COLUMNS} FROM posts WHERE id = ?`)
     .get(id) as PostRow | undefined;
 }

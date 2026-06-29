@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { DateTimeStringSchema, LocaleSchema, PaginationSchema, SlugSchema, hasUniqueLocales } from "./common.js";
 
-// `hidden` remains accepted during the database migration window and is removed
-// after every API consumer has moved to `archived`.
+// Kept for frontend source compatibility while the admin UI migrates its
+// historical hidden branches to archived. The API rejects new hidden writes.
 export const PostStatusSchema = z.enum(["draft", "published", "hidden", "archived"]);
 export type PostStatus = z.infer<typeof PostStatusSchema>;
 
@@ -36,6 +36,10 @@ export const PublicPostListItemSchema = z.object({
   slug: SlugSchema,
   status: PostStatusSchema,
   publishedAt: DateTimeStringSchema.nullable(),
+  isPinned: z.boolean().optional(),
+  isFeatured: z.boolean().optional(),
+  coverUrl: z.string().optional(),
+  deletedAt: DateTimeStringSchema.nullable().optional(),
   category: CategorySchema.nullable(),
   tags: z.array(TagSchema),
   translations: z.array(PostTranslationSchema)

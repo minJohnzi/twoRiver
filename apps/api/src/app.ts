@@ -58,7 +58,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
       reply.header("Vary", "Origin");
       reply.header("Access-Control-Allow-Credentials", "true");
       reply.header("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token");
-      reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+      reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
     }
 
     if (request.method === "OPTIONS") {

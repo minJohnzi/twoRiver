@@ -596,7 +596,7 @@ describe("post routes", () => {
     }
   });
 
-  test("hides a published post from public routes without clearing its publish history", async () => {
+  test("archives a published post without clearing its publish history", async () => {
     const app = await createTestApp();
 
     try {
@@ -607,35 +607,35 @@ describe("post routes", () => {
         url: "/api/admin/posts",
         headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
-          slug: "temporarily-hidden",
+          slug: "temporarily-archived",
           status: "published",
           publishedAt,
           tagSlugs: [],
-          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Visible body" }]
+          translations: [{ locale: "en", title: "Temporarily archived", summary: "", contentMarkdown: "Visible body" }]
         }
       });
 
       expect(createResponse.statusCode).toBe(201);
       const postId = createResponse.json().post.id;
 
-      const hideResponse = await app.inject({
+      const archiveResponse = await app.inject({
         method: "PUT",
         url: `/api/admin/posts/${postId}`,
         headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
-          slug: "temporarily-hidden",
-          status: "hidden",
+          slug: "temporarily-archived",
+          status: "archived",
           publishedAt,
           tagSlugs: [],
-          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Hidden body" }]
+          translations: [{ locale: "en", title: "Temporarily archived", summary: "", contentMarkdown: "Archived body" }]
         }
       });
 
-      expect(hideResponse.statusCode).toBe(200);
-      expect(hideResponse.json().post.status).toBe("hidden");
-      expect(hideResponse.json().post.publishedAt).toBe(publishedAt);
+      expect(archiveResponse.statusCode).toBe(200);
+      expect(archiveResponse.json().post.status).toBe("archived");
+      expect(archiveResponse.json().post.publishedAt).toBe(publishedAt);
 
-      const publicDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-hidden" });
+      const publicDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-archived" });
       expect(publicDetailResponse.statusCode).toBe(404);
 
       const publicListResponse = await app.inject({ method: "GET", url: "/api/posts" });
@@ -647,11 +647,11 @@ describe("post routes", () => {
         url: `/api/admin/posts/${postId}`,
         headers: { cookie, "x-csrf-token": csrfToken },
         payload: {
-          slug: "temporarily-hidden",
+          slug: "temporarily-archived",
           status: "published",
           publishedAt,
           tagSlugs: [],
-          translations: [{ locale: "en", title: "Temporarily hidden", summary: "", contentMarkdown: "Visible again" }]
+          translations: [{ locale: "en", title: "Temporarily archived", summary: "", contentMarkdown: "Visible again" }]
         }
       });
 
@@ -659,7 +659,7 @@ describe("post routes", () => {
       expect(republishResponse.json().post.status).toBe("published");
       expect(republishResponse.json().post.publishedAt).toBe(publishedAt);
 
-      const visibleDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-hidden" });
+      const visibleDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-archived" });
       expect(visibleDetailResponse.statusCode).toBe(200);
       expect(visibleDetailResponse.json().post.publishedAt).toBe(publishedAt);
     } finally {
@@ -702,6 +702,236 @@ describe("post routes", () => {
         })
       );
       expect(pageResponse.json().posts.map((post: { slug: string }) => post.slug)).toEqual(["published-page-1"]);
+    } finally {
+      await app.close();
+    }
+  });
+  test("persists lifecycle metadata and orders pinned public posts first", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const createPost = async (slug: string, publishedAt: string, isPinned: boolean) =>
+        app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: {
+            slug,
+            status: "published",
+            publishedAt,
+            tagSlugs: [],
+            isPinned,
+            isFeatured: isPinned,
+            coverUrl: isPinned ? "/uploads/covers/pinned.webp" : "",
+            translations: [{ locale: "en", title: slug, summary: "", contentMarkdown: "" }]
+          }
+        });
+
+      const pinnedResponse = await createPost("older-pinned", "2026-01-01T00:00:00.000Z", true);
+      const recentResponse = await createPost("newer-regular", "2026-05-01T00:00:00.000Z", false);
+      expect(pinnedResponse.statusCode).toBe(201);
+      expect(recentResponse.statusCode).toBe(201);
+      expect(pinnedResponse.json().post).toEqual(
+        expect.objectContaining({
+          isPinned: true,
+          isFeatured: true,
+          coverUrl: "/uploads/covers/pinned.webp",
+          deletedAt: null
+        })
+      );
+
+      const listResponse = await app.inject({ method: "GET", url: "/api/posts" });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().posts.map((post: { slug: string }) => post.slug)).toEqual([
+        "older-pinned",
+        "newer-regular"
+      ]);
+
+      const lifecycleResponse = await app.inject({
+        method: "PATCH",
+        url: `/api/admin/posts/${pinnedResponse.json().post.id}/lifecycle`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { status: "archived", isPinned: false, coverUrl: "" }
+      });
+      expect(lifecycleResponse.statusCode).toBe(200);
+      expect(lifecycleResponse.json().post).toEqual(
+        expect.objectContaining({ status: "archived", isPinned: false, isFeatured: true, coverUrl: "" })
+      );
+      expect((await app.inject({ method: "GET", url: "/api/posts/older-pinned" })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("moves posts through trash, restore, and guarded permanent deletion", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "trash-lifecycle",
+          status: "published",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Trash lifecycle", summary: "", contentMarkdown: "" }]
+        }
+      });
+      const postId = createResponse.json().post.id as number;
+
+      const trashResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postId}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(trashResponse.statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/posts/trash-lifecycle" })).statusCode).toBe(404);
+
+      const editTrashedResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${postId}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "trash-lifecycle-edited",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Should not change", summary: "", contentMarkdown: "" }]
+        }
+      });
+      expect(editTrashedResponse.statusCode).toBe(404);
+
+      const adminList = await app.inject({ method: "GET", url: "/api/admin/posts", headers: { cookie: auth.cookie } });
+      expect(adminList.json()).toEqual({ posts: [] });
+      const trashList = await app.inject({
+        method: "GET",
+        url: "/api/admin/posts/trash",
+        headers: { cookie: auth.cookie }
+      });
+      expect(trashList.statusCode).toBe(200);
+      expect(trashList.json().posts[0]).toEqual(expect.objectContaining({ id: postId, deletedAt: expect.any(String) }));
+
+      const earlyDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postId}/permanent`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(earlyDelete.statusCode).toBe(409);
+
+      const restoreResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${postId}/restore`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(restoreResponse.statusCode).toBe(200);
+      expect(restoreResponse.json().post.deletedAt).toBeNull();
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postId}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      app.db.prepare("UPDATE posts SET deleted_at = ? WHERE id = ?").run("2026-01-01T00:00:00.000Z", postId);
+
+      const permanentDelete = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postId}/permanent`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(permanentDelete.statusCode).toBe(200);
+      expect(permanentDelete.json()).toEqual({ ok: true });
+      expect(app.db.prepare("SELECT id FROM posts WHERE id = ?").get(postId)).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("applies bulk lifecycle changes transactionally", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const ids: number[] = [];
+      for (const slug of ["bulk-one", "bulk-two"]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: {
+            slug,
+            status: "published",
+            publishedAt: "2026-02-01T00:00:00.000Z",
+            tagSlugs: [],
+            translations: [{ locale: "en", title: slug, summary: "", contentMarkdown: "" }]
+          }
+        });
+        ids.push(response.json().post.id);
+      }
+
+      const failedBulk = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/bulk",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { ids: [ids[0], 999999], action: "archive" }
+      });
+      expect(failedBulk.statusCode).toBe(404);
+      expect(app.db.prepare("SELECT status FROM posts WHERE id = ?").get(ids[0])).toEqual({ status: "published" });
+
+      const archiveResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/bulk",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { ids, action: "archive" }
+      });
+      expect(archiveResponse.statusCode).toBe(200);
+      expect(archiveResponse.json()).toEqual({ updated: 2 });
+
+      const trashResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/bulk",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { ids, action: "trash" }
+      });
+      expect(trashResponse.statusCode).toBe(200);
+      expect(trashResponse.json()).toEqual({ updated: 2 });
+
+      const restoreResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/bulk",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { ids, action: "restore" }
+      });
+      expect(restoreResponse.statusCode).toBe(200);
+      expect(restoreResponse.json()).toEqual({ updated: 2 });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects the retired hidden post status", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "retired-hidden",
+          status: "hidden",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Retired hidden", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: "Invalid post input" });
     } finally {
       await app.close();
     }
@@ -805,7 +1035,7 @@ describe("post migrations", () => {
     }
   });
 
-  test("allows hidden status after migrating existing post status constraints", () => {
+  test("rejects retired hidden status after migrating existing post status constraints", () => {
     const databasePath = createDatabasePath();
     const db = openDatabase(databasePath);
     db.exec(`
@@ -836,9 +1066,9 @@ describe("post migrations", () => {
              WHERE slug = ?`
           )
           .run("legacy-published")
-      ).not.toThrow();
+      ).toThrow();
       expect(migratedDb.prepare("SELECT status, published_at FROM posts WHERE slug = ?").get("legacy-published")).toEqual({
-        status: "hidden",
+        status: "published",
         published_at: "2026-01-02T00:00:00.000Z"
       });
     } finally {
