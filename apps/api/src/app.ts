@@ -15,6 +15,7 @@ import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminProjectRoutes } from "./routes/adminProjectRoutes.js";
 import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
 import { adminSiteSettingsRoutes } from "./routes/adminSiteSettingsRoutes.js";
+import { adminSystemRoutes } from "./routes/adminSystemRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { analyticsRoutes } from "./routes/analyticsRoutes.js";
@@ -74,11 +75,11 @@ export function buildApp({ config, db }: BuildAppOptions) {
   });
 
   app.addHook("onReady", async () => {
-    deleteExpiredSessions(db);
+    deleteExpiredSessions(app.db);
     sessionCleanupTimer = setInterval(
       () => {
         try {
-          deleteExpiredSessions(db);
+          deleteExpiredSessions(app.db);
         } catch (error) {
           app.log.error({ error }, "Failed to clean expired sessions");
         }
@@ -92,7 +93,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
     if (sessionCleanupTimer) {
       clearInterval(sessionCleanupTimer);
     }
-    db.close();
+    app.db.close();
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -130,6 +131,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(adminProjectRoutes);
   app.register(adminResourceRoutes, { config });
   app.register(adminSiteSettingsRoutes);
+  app.register(adminSystemRoutes, { config, rootApp: app });
   app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
 
