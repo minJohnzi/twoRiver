@@ -10,6 +10,7 @@ import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
 import { adminPageRoutes } from "./routes/adminPageRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
+import { adminProjectRoutes } from "./routes/adminProjectRoutes.js";
 import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
@@ -119,6 +120,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(adminCategoryRoutes);
   app.register(adminPageRoutes);
   app.register(adminPostRoutes, { config });
+  app.register(adminProjectRoutes);
   app.register(adminResourceRoutes, { config });
   app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
