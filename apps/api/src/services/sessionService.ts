@@ -4,6 +4,9 @@ import type { BlogDatabase } from "../db/connection.js";
 export interface SessionUser {
   id: number;
   username: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string;
   csrfToken: string;
 }
 
@@ -16,6 +19,9 @@ export interface CreatedSession {
 interface SessionUserRow {
   id: number;
   username: string;
+  display_name: string;
+  email: string;
+  avatar_url: string;
   csrf_token: string | null;
   expires_at: string;
 }
@@ -41,7 +47,14 @@ export function getSessionUser(db: BlogDatabase, sessionId: string): SessionUser
   const row = db
     .prepare(
       `
-        SELECT users.id, users.username, sessions.csrf_token, sessions.expires_at
+        SELECT
+          users.id,
+          users.username,
+          users.display_name,
+          users.email,
+          users.avatar_url,
+          sessions.csrf_token,
+          sessions.expires_at
         FROM sessions
         INNER JOIN users ON users.id = sessions.user_id
         WHERE sessions.id = ?
@@ -66,12 +79,19 @@ export function getSessionUser(db: BlogDatabase, sessionId: string): SessionUser
   return {
     id: row.id,
     username: row.username,
+    displayName: row.display_name,
+    email: row.email,
+    avatarUrl: row.avatar_url,
     csrfToken: row.csrf_token
   };
 }
 
 export function deleteSession(db: BlogDatabase, sessionId: string): void {
   db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+}
+
+export function deleteOtherSessions(db: BlogDatabase, userId: number, currentSessionId: string): number {
+  return db.prepare("DELETE FROM sessions WHERE user_id = ? AND id <> ?").run(userId, currentSessionId).changes;
 }
 
 export function deleteExpiredSessions(db: BlogDatabase): number {

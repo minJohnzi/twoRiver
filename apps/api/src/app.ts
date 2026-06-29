@@ -7,6 +7,7 @@ import type { AppConfig } from "./config.js";
 import type { BlogDatabase } from "./db/connection.js";
 import authPlugin from "./plugins/auth.js";
 import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
+import { adminAccountRoutes } from "./routes/adminAccountRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
 import { adminNavigationRoutes } from "./routes/adminNavigationRoutes.js";
 import { adminPageRoutes } from "./routes/adminPageRoutes.js";
@@ -120,6 +121,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(publicRoutes);
   app.register(publicContentRoutes);
   app.register(publicAboutRoutes);
+  app.register(adminAccountRoutes);
   app.register(adminAboutRoutes);
   app.register(adminCategoryRoutes);
   app.register(adminNavigationRoutes);

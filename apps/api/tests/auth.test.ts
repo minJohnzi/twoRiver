@@ -70,10 +70,13 @@ describe("auth routes", () => {
 
       expect(loginResponse.statusCode).toBe(200);
       expect(loginResponse.json()).toEqual({
-        user: {
+        user: expect.objectContaining({
           id: 1,
-          username: "admin"
-        }
+          username: "admin",
+          displayName: "",
+          email: "",
+          avatarUrl: ""
+        })
       });
 
       const setCookie = loginResponse.headers["set-cookie"];
@@ -105,10 +108,13 @@ describe("auth routes", () => {
 
       expect(meResponse.statusCode).toBe(200);
       expect(meResponse.json()).toEqual({
-        user: {
+        user: expect.objectContaining({
           id: 1,
-          username: "admin"
-        }
+          username: "admin",
+          displayName: "",
+          email: "",
+          avatarUrl: ""
+        })
       });
     } finally {
       await app.close();

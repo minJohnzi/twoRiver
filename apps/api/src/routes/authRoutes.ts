@@ -4,15 +4,10 @@ import type { AppConfig } from "../config.js";
 import { createSession, deleteSession } from "../services/sessionService.js";
 import { verifyPassword } from "../services/passwordService.js";
 import { FixedWindowRateLimiter } from "../services/rateLimiter.js";
+import { getAdminUserByUsername, toPublicAdminUser } from "../repositories/systemRepository.js";
 
 interface AuthRoutesOptions {
   config: AppConfig;
-}
-
-interface UserRow {
-  id: number;
-  username: string;
-  password_hash: string;
 }
 
 const loginRateLimiter = new FixedWindowRateLimiter({
@@ -40,11 +35,9 @@ export async function authRoutes(app: FastifyInstance, { config }: AuthRoutesOpt
       return;
     }
 
-    const user = app.db
-      .prepare("SELECT id, username, password_hash FROM users WHERE username = ?")
-      .get(parsed.data.username) as UserRow | undefined;
+    const user = getAdminUserByUsername(app.db, parsed.data.username);
 
-    if (!user || !(await verifyPassword(user.password_hash, parsed.data.password))) {
+    if (!user || !(await verifyPassword(user.passwordHash, parsed.data.password))) {
       reply.code(401).send({ message: "Invalid username or password" });
       return;
     }
@@ -68,10 +61,7 @@ export async function authRoutes(app: FastifyInstance, { config }: AuthRoutesOpt
     });
 
     return {
-      user: {
-        id: user.id,
-        username: user.username
-      }
+      user: toPublicAdminUser(user)
     };
   });
 
@@ -107,7 +97,10 @@ export async function authRoutes(app: FastifyInstance, { config }: AuthRoutesOpt
       return {
         user: {
           id: request.user.id,
-          username: request.user.username
+          username: request.user.username,
+          displayName: request.user.displayName,
+          email: request.user.email,
+          avatarUrl: request.user.avatarUrl
         }
       };
     }
