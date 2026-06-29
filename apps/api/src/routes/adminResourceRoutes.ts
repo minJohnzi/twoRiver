@@ -6,6 +6,7 @@ import {
   deleteUploadResource,
   listUploadResources,
   moveUploadResource,
+  UploadResourceReferencedError,
   storeUploadResource,
   type UploadResourceFile,
   UploadResourcePathError,
@@ -57,7 +58,7 @@ export async function adminResourceRoutes(app: FastifyInstance, { config }: Admi
   app.addHook("preHandler", app.requireCsrf);
 
   app.get("/api/admin/resources", async () => {
-    const resources = await listUploadResources(config);
+    const resources = await listUploadResources(config, app.db);
     return { resources };
   });
 
@@ -86,7 +87,7 @@ export async function adminResourceRoutes(app: FastifyInstance, { config }: Admi
         return;
       }
 
-      const resource = await storeUploadResource(config, resourceFile, folder);
+      const resource = await storeUploadResource(config, app.db, resourceFile, folder);
       reply.code(201);
       return { resource };
     } catch (error) {
@@ -109,7 +110,7 @@ export async function adminResourceRoutes(app: FastifyInstance, { config }: Admi
     }
 
     try {
-      const resource = await moveUploadResource(config, request.body.url, request.body.folder);
+      const resource = await moveUploadResource(config, app.db, request.body.url, request.body.folder);
       return { resource };
     } catch (error) {
       if (error instanceof UploadResourcePathError) {
@@ -131,7 +132,7 @@ export async function adminResourceRoutes(app: FastifyInstance, { config }: Admi
     }
 
     try {
-      const deleted = await deleteUploadResource(config, request.body.url);
+      const deleted = await deleteUploadResource(config, app.db, request.body.url);
       if (!deleted) {
         reply.code(404).send({ message: "Resource not found" });
         return;
@@ -140,6 +141,10 @@ export async function adminResourceRoutes(app: FastifyInstance, { config }: Admi
     } catch (error) {
       if (error instanceof UploadResourcePathError) {
         reply.code(400).send({ message: error.message });
+        return;
+      }
+      if (error instanceof UploadResourceReferencedError) {
+        reply.code(409).send({ message: error.message });
         return;
       }
       throw error;

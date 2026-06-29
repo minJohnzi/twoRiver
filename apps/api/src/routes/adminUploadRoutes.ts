@@ -9,6 +9,7 @@ import {
   storeAboutAvatar,
   storePostImage
 } from "../services/uploads/imageUploadService.js";
+import { registerStoredUploadResource } from "../services/uploads/resourceLibraryService.js";
 
 interface AdminUploadRouteOptions {
   config: AppConfig;
@@ -69,6 +70,13 @@ export async function adminUploadRoutes(app: FastifyInstance, { config }: AdminU
       }
 
       const image = await storeAboutAvatar(config, imageFile);
+      await registerStoredUploadResource(config, app.db, {
+        url: image.url,
+        originalFilename: imageFile.filename,
+        mimeType: imageFile.mimetype,
+        buffer: await imageFile.toBuffer(),
+        kind: "about-image"
+      });
       reply.code(201);
       return image;
     } catch (error) {
@@ -116,6 +124,13 @@ export async function adminUploadRoutes(app: FastifyInstance, { config }: AdminU
       }
 
       const image = await storePostImage(config, postUid, imageFile);
+      await registerStoredUploadResource(config, app.db, {
+        url: image.url,
+        originalFilename: imageFile.filename,
+        mimeType: imageFile.mimetype,
+        buffer: await imageFile.toBuffer(),
+        kind: "post-image"
+      });
       reply.code(201);
       return image;
     } catch (error) {

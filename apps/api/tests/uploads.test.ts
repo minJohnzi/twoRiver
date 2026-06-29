@@ -526,6 +526,155 @@ describe("admin image uploads", () => {
     }
   });
 
+  test("registers every upload and reconciles legacy files from disk", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createPost(app, auth);
+      await uploadImage(app, auth, { postUid: post.uid });
+      await uploadAboutAvatar(app, auth);
+      await uploadResource(app, auth, {
+        folder: "documents",
+        filename: "registered.txt",
+        contentType: "text/plain",
+        bytes: Buffer.from("hello")
+      });
+
+      const config = appConfigs.get(app);
+      if (!config) {
+        throw new Error("Expected app config");
+      }
+      const legacyPath = path.join(getUploadsRoot(config), "resources", "legacy", "manual.txt");
+      await fs.mkdir(path.dirname(legacyPath), { recursive: true });
+      await fs.writeFile(legacyPath, "legacy");
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().resources).toHaveLength(4);
+      expect(response.json().resources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: expect.any(Number), source: "upload", referenceCount: 0 }),
+          expect.objectContaining({
+            url: "/uploads/resources/legacy/manual.txt",
+            source: "legacy",
+            originalFilename: "manual.txt"
+          })
+        ])
+      );
+
+      const records = app.db
+        .prepare("SELECT url, source FROM resources ORDER BY url")
+        .all() as Array<{ url: string; source: string }>;
+      expect(records).toHaveLength(4);
+      expect(records.find((record) => record.url.endsWith("/legacy/manual.txt"))?.source).toBe("legacy");
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("counts cross-content references and blocks deleting referenced resources", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createPost(app, auth);
+      const uploadResponse = await uploadResource(app, auth, { folder: "shared", filename: "reference.png" });
+      expect(uploadResponse.statusCode).toBe(201);
+      const url = uploadResponse.json().resource.url as string;
+      const now = new Date().toISOString();
+
+      app.db.prepare("UPDATE post_translations SET content_markdown = ? WHERE post_id = ?").run(`![asset](${url})`, post.id);
+      const pageId = Number(
+        app.db
+          .prepare("INSERT INTO pages (slug, status, created_at, updated_at) VALUES (?, 'draft', ?, ?)")
+          .run("resource-page", now, now).lastInsertRowid
+      );
+      app.db
+        .prepare("INSERT INTO page_translations (page_id, locale, title, content_markdown) VALUES (?, 'en', ?, ?)")
+        .run(pageId, "Resource page", `[asset](${url})`);
+      app.db
+        .prepare(
+          `INSERT INTO projects (slug, cover_url, created_at, updated_at)
+           VALUES (?, ?, ?, ?)`
+        )
+        .run("resource-project", url, now, now);
+      app.db.prepare("UPDATE site_settings SET logo_url = ? WHERE id = 1").run(url);
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().resources[0]).toEqual(expect.objectContaining({ url, referenceCount: 4 }));
+
+      const blockedResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url }
+      });
+      expect(blockedResponse.statusCode).toBe(409);
+      expect(blockedResponse.json()).toEqual({ message: "Resource is referenced by published content" });
+
+      app.db.prepare("UPDATE post_translations SET content_markdown = '' WHERE post_id = ?").run(post.id);
+      app.db.prepare("DELETE FROM pages WHERE id = ?").run(pageId);
+      app.db.prepare("DELETE FROM projects WHERE slug = ?").run("resource-project");
+      app.db.prepare("UPDATE site_settings SET logo_url = '' WHERE id = 1").run();
+      const deleteResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url }
+      });
+      expect(deleteResponse.statusCode).toBe(200);
+      expect(app.db.prepare("SELECT id FROM resources WHERE url = ?").get(url)).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("restores the source file when a resource move cannot update its registry record", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const uploadResponse = await uploadResource(app, auth, { folder: "source", filename: "rollback.png" });
+      const resource = uploadResponse.json().resource as { url: string; filename: string };
+      const config = appConfigs.get(app);
+      if (!config) {
+        throw new Error("Expected app config");
+      }
+      const sourcePath = path.join(getUploadsRoot(config), ...resource.url.slice("/uploads/".length).split("/"));
+      const conflictingUrl = `/uploads/resources/conflict/${resource.filename}`;
+      const now = new Date().toISOString();
+      app.db
+        .prepare(
+          `INSERT INTO resources (
+             url, storage_path, original_filename, mime_type, size_bytes, kind, folder, source, created_at, updated_at
+           ) VALUES (?, ?, ?, 'image/png', 0, 'asset', 'conflict', 'legacy', ?, ?)`
+        )
+        .run(conflictingUrl, `resources/conflict/${resource.filename}`, resource.filename, now, now);
+
+      const moveResponse = await app.inject({
+        method: "PUT",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url: resource.url, folder: "conflict" }
+      });
+      expect(moveResponse.statusCode).toBe(500);
+      await expect(fs.access(sourcePath)).resolves.toBeUndefined();
+      expect(app.db.prepare("SELECT url FROM resources WHERE url = ?").get(resource.url)).toEqual({ url: resource.url });
+    } finally {
+      await app.close();
+    }
+  });
+
   test("moves uploaded resources between folders", async () => {
     const app = await createTestApp();
 

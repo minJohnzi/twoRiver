@@ -2,6 +2,16 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../../config.js";
+import type { BlogDatabase } from "../../db/connection.js";
+import {
+  deleteResourceRecord,
+  deleteResourceRecordsNotIn,
+  getResourceByUrl,
+  upsertResource,
+  updateResourceLocation,
+  type ResourceRecord
+} from "../../repositories/resourcesRepository.js";
+import { countResourceReferences } from "../resourceReferenceService.js";
 import { getUploadsRoot } from "./uploadPaths.js";
 
 export type UploadResourceKind = "post-image" | "about-image" | "asset";
@@ -10,6 +20,32 @@ export const DEFAULT_RESOURCE_FOLDER = "general";
 export const MAX_RESOURCE_BYTES = 5 * 1024 * 1024;
 
 export interface UploadResource {
+  id: number;
+  kind: UploadResourceKind;
+  url: string;
+  relativePath: string;
+  filename: string;
+  directory: string;
+  folder: string;
+  originalFilename: string;
+  sizeBytes: number;
+  updatedAt: string;
+  contentType: string;
+  mimeType: string;
+  source: string;
+  checksumSha256: string;
+  referenceCount: number;
+  createdAt: string;
+  postUid: string | null;
+}
+
+export interface UploadResourceFile {
+  filename: string;
+  mimetype: string;
+  buffer: Buffer;
+}
+
+interface UploadResourceFileInfo {
   kind: UploadResourceKind;
   url: string;
   relativePath: string;
@@ -20,12 +56,6 @@ export interface UploadResource {
   updatedAt: string;
   contentType: string;
   postUid: string | null;
-}
-
-export interface UploadResourceFile {
-  filename: string;
-  mimetype: string;
-  buffer: Buffer;
 }
 
 export class UploadResourcePathError extends Error {
@@ -40,6 +70,22 @@ export class UploadResourceValidationError extends Error {
     super(message);
     this.name = "UploadResourceValidationError";
   }
+}
+
+export class UploadResourceReferencedError extends Error {
+  constructor(message = "Resource is referenced by published content") {
+    super(message);
+    this.name = "UploadResourceReferencedError";
+  }
+}
+
+export interface RegisterStoredUploadResourceInput {
+  url: string;
+  originalFilename: string;
+  mimeType: string;
+  buffer?: Buffer;
+  kind: UploadResourceKind;
+  source?: string;
 }
 
 interface AllowedResourceType {
@@ -221,7 +267,7 @@ function publicUrlToRelativePath(value: string): string | undefined {
   }
 }
 
-function classifyResource(relativePath: string): Pick<UploadResource, "kind" | "postUid"> {
+function classifyResource(relativePath: string): Pick<UploadResourceFileInfo, "kind" | "postUid"> {
   const parts = relativePath.split(path.sep);
   if (parts[0] === "images" && parts[1] === "posts" && parts[2]) {
     return { kind: "post-image", postUid: parts[2] };
@@ -270,7 +316,7 @@ function resolveUploadResourceFilePath(config: AppConfig, value: string): string
   return filePath;
 }
 
-async function resourceFromFilePath(uploadsRoot: string, filePath: string): Promise<UploadResource> {
+async function resourceFromFilePath(uploadsRoot: string, filePath: string): Promise<UploadResourceFileInfo> {
   const stat = await fs.stat(filePath);
   const relativePath = path.relative(uploadsRoot, filePath);
   const filename = path.basename(filePath);
@@ -332,15 +378,119 @@ async function removeEmptyDirectories(directory: string, stopDirectory: string):
   await removeEmptyDirectories(path.dirname(directory), stopDirectory);
 }
 
-export async function listUploadResources(config: AppConfig): Promise<UploadResource[]> {
-  const uploadsRoot = path.resolve(getUploadsRoot(config));
-  const files = await walkFiles(uploadsRoot);
-  const resources = await Promise.all(files.map((filePath) => resourceFromFilePath(uploadsRoot, filePath)));
-
-  return resources.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt));
+function checksumBuffer(buffer: Buffer): string {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-export async function storeUploadResource(config: AppConfig, file: UploadResourceFile, folderInput: unknown): Promise<UploadResource> {
+async function checksumFile(filePath: string): Promise<string> {
+  return checksumBuffer(await fs.readFile(filePath));
+}
+
+function getOriginalFilename(record: ResourceRecord | undefined, fileInfo: UploadResourceFileInfo, fallback?: string): string {
+  return record?.originalFilename ?? fallback ?? fileInfo.filename;
+}
+
+function toRegisteredResource(
+  db: BlogDatabase,
+  fileInfo: UploadResourceFileInfo,
+  record: ResourceRecord
+): UploadResource {
+  return {
+    ...fileInfo,
+    id: record.id,
+    originalFilename: record.originalFilename,
+    sizeBytes: record.sizeBytes,
+    contentType: record.mimeType,
+    mimeType: record.mimeType,
+    source: record.source,
+    checksumSha256: record.checksumSha256,
+    referenceCount: countResourceReferences(db, record.url),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+async function registerFilesystemResource(
+  db: BlogDatabase,
+  uploadsRoot: string,
+  filePath: string,
+  input: Partial<Pick<RegisterStoredUploadResourceInput, "originalFilename" | "mimeType" | "kind" | "source" | "buffer">> = {}
+): Promise<{ fileInfo: UploadResourceFileInfo; record: ResourceRecord }> {
+  const fileInfo = await resourceFromFilePath(uploadsRoot, filePath);
+  const existing = getResourceByUrl(db, fileInfo.url);
+  const checksumSha256 = input.buffer ? checksumBuffer(input.buffer) : await checksumFile(filePath);
+  const record = upsertResource(db, {
+    url: fileInfo.url,
+    storagePath: fileInfo.relativePath,
+    originalFilename: getOriginalFilename(existing, fileInfo, input.originalFilename),
+    mimeType: input.mimeType ?? existing?.mimeType ?? fileInfo.contentType,
+    sizeBytes: fileInfo.sizeBytes,
+    kind: input.kind ?? existing?.kind ?? fileInfo.kind,
+    folder: fileInfo.folder,
+    source: input.source ?? existing?.source ?? "legacy",
+    checksumSha256
+  });
+
+  return { fileInfo, record };
+}
+
+async function reconcileUploadResources(config: AppConfig, db: BlogDatabase): Promise<UploadResource[]> {
+  const uploadsRoot = path.resolve(getUploadsRoot(config));
+  const files = await walkFiles(uploadsRoot);
+  const resources = await Promise.all(
+    files.map(async (filePath) => {
+      const { fileInfo, record } = await registerFilesystemResource(db, uploadsRoot, filePath);
+      return toRegisteredResource(db, fileInfo, record);
+    })
+  );
+
+  deleteResourceRecordsNotIn(db, resources.map((resource) => resource.url));
+
+  return resources.sort((first, second) => second.updatedAt.localeCompare(first.updatedAt) || second.id - first.id);
+}
+
+export async function listUploadResources(config: AppConfig, db: BlogDatabase): Promise<UploadResource[]> {
+  return reconcileUploadResources(config, db);
+}
+
+export async function registerStoredUploadResource(
+  config: AppConfig,
+  db: BlogDatabase,
+  input: RegisterStoredUploadResourceInput
+): Promise<UploadResource> {
+  const uploadsRoot = path.resolve(getUploadsRoot(config));
+  const filePath = resolveUploadResourceFilePath(config, input.url);
+
+  try {
+    const registerInput: Partial<
+      Pick<RegisterStoredUploadResourceInput, "originalFilename" | "mimeType" | "kind" | "source" | "buffer">
+    > = {
+      originalFilename: input.originalFilename,
+      mimeType: input.mimeType,
+      kind: input.kind,
+      source: input.source ?? "upload"
+    };
+    if (input.buffer) {
+      registerInput.buffer = input.buffer;
+    }
+
+    const { fileInfo, record } = await registerFilesystemResource(db, uploadsRoot, filePath, {
+      ...registerInput
+    });
+    return toRegisteredResource(db, fileInfo, record);
+  } catch (error) {
+    await fs.rm(filePath, { force: true }).catch(() => undefined);
+    await removeEmptyDirectories(path.dirname(filePath), uploadsRoot).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function storeUploadResource(
+  config: AppConfig,
+  db: BlogDatabase,
+  file: UploadResourceFile,
+  folderInput: unknown
+): Promise<UploadResource> {
   const uploadsRoot = path.resolve(getUploadsRoot(config));
   const folder = validateResourceFolder(folderInput);
   const { extension } = validateResourceFile(file);
@@ -349,12 +499,33 @@ export async function storeUploadResource(config: AppConfig, file: UploadResourc
 
   const filename = sanitizeOriginalFilename(file.filename, extension);
   const filePath = path.join(directory, filename);
-  await fs.writeFile(filePath, file.buffer, { flag: "wx" });
+  const tempPath = path.join(directory, `.${filename}.${crypto.randomUUID()}.tmp`);
 
-  return resourceFromFilePath(uploadsRoot, filePath);
+  try {
+    await fs.writeFile(tempPath, file.buffer, { flag: "wx" });
+    await fs.rename(tempPath, filePath);
+    const { fileInfo, record } = await registerFilesystemResource(db, uploadsRoot, filePath, {
+      originalFilename: file.filename,
+      mimeType: getContentType(filename),
+      kind: "asset",
+      source: "upload",
+      buffer: file.buffer
+    });
+    return toRegisteredResource(db, fileInfo, record);
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    await fs.rm(filePath, { force: true }).catch(() => undefined);
+    await removeEmptyDirectories(directory, uploadsRoot).catch(() => undefined);
+    throw error;
+  }
 }
 
-export async function moveUploadResource(config: AppConfig, value: string, folderInput: unknown): Promise<UploadResource> {
+export async function moveUploadResource(
+  config: AppConfig,
+  db: BlogDatabase,
+  value: string,
+  folderInput: unknown
+): Promise<UploadResource> {
   const uploadsRoot = path.resolve(getUploadsRoot(config));
   const sourcePath = resolveUploadResourceFilePath(config, value);
   const stat = await fs.stat(sourcePath).catch((error: NodeJS.ErrnoException) => {
@@ -370,6 +541,7 @@ export async function moveUploadResource(config: AppConfig, value: string, folde
     throw new UploadResourcePathError("Upload resource path is not a file");
   }
 
+  const sourceRegistration = await registerFilesystemResource(db, uploadsRoot, sourcePath);
   const folder = validateResourceFolder(folderInput);
   const targetDirectory = path.join(uploadsRoot, "resources", ...folder.split("/"));
   await fs.mkdir(targetDirectory, { recursive: true });
@@ -381,13 +553,29 @@ export async function moveUploadResource(config: AppConfig, value: string, folde
 
   if (path.resolve(targetPath) !== path.resolve(sourcePath)) {
     await fs.rename(sourcePath, targetPath);
-    await removeEmptyDirectories(path.dirname(sourcePath), uploadsRoot);
+    try {
+      const fileInfo = await resourceFromFilePath(uploadsRoot, targetPath);
+      const record = updateResourceLocation(db, sourceRegistration.record.id, {
+        url: fileInfo.url,
+        storagePath: fileInfo.relativePath,
+        folder: fileInfo.folder,
+        sizeBytes: fileInfo.sizeBytes,
+        mimeType: sourceRegistration.record.mimeType,
+        checksumSha256: sourceRegistration.record.checksumSha256
+      });
+      await removeEmptyDirectories(path.dirname(sourcePath), uploadsRoot);
+      return toRegisteredResource(db, fileInfo, record);
+    } catch (error) {
+      await fs.rename(targetPath, sourcePath).catch(() => undefined);
+      await removeEmptyDirectories(targetDirectory, uploadsRoot).catch(() => undefined);
+      throw error;
+    }
   }
 
-  return resourceFromFilePath(uploadsRoot, targetPath);
+  return toRegisteredResource(db, sourceRegistration.fileInfo, sourceRegistration.record);
 }
 
-export async function deleteUploadResource(config: AppConfig, value: string): Promise<boolean> {
+export async function deleteUploadResource(config: AppConfig, db: BlogDatabase, value: string): Promise<boolean> {
   const uploadsRoot = path.resolve(getUploadsRoot(config));
   const filePath = resolveUploadResourceFilePath(config, value);
 
@@ -405,7 +593,20 @@ export async function deleteUploadResource(config: AppConfig, value: string): Pr
     throw new UploadResourcePathError("Upload resource path is not a file");
   }
 
-  await fs.rm(filePath, { force: true });
+  const { record } = await registerFilesystemResource(db, uploadsRoot, filePath);
+  if (countResourceReferences(db, record.url) > 0) {
+    throw new UploadResourceReferencedError();
+  }
+
+  const trashPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${crypto.randomUUID()}.delete`);
+  await fs.rename(filePath, trashPath);
+  try {
+    deleteResourceRecord(db, record.id);
+    await fs.rm(trashPath, { force: true });
+  } catch (error) {
+    await fs.rename(trashPath, filePath).catch(() => undefined);
+    throw error;
+  }
   await removeEmptyDirectories(path.dirname(filePath), uploadsRoot);
   return true;
 }
