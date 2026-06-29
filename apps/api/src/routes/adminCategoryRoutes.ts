@@ -1,22 +1,18 @@
-import { z } from "zod";
+import { CreateCategoryInputSchema, UpdateCategoryInputSchema } from "@tworiver/shared";
 import type { FastifyInstance } from "fastify";
-import { getCategoryById, getCategoryBySlug, listCategories } from "../repositories/categoriesRepository.js";
-import { normalizeSlug } from "../services/slugService.js";
+import {
+  CategoryConflictError,
+  CategoryReferencedError,
+  createCategory,
+  deleteCategory,
+  listCategories,
+  updateCategory
+} from "../repositories/categoriesRepository.js";
 import { parseId } from "./parseId.js";
 
 interface IdParams {
   id: string;
 }
-
-const CreateCategoryInputSchema = z.object({
-  slug: z.string().min(1),
-  name: z.string().min(1).optional()
-});
-
-const UpdateCategoryInputSchema = z.object({
-  slug: z.string().min(1).optional(),
-  name: z.string().min(1).optional()
-});
 
 export async function adminCategoryRoutes(app: FastifyInstance) {
   app.addHook("preHandler", app.requireAuth);
@@ -33,28 +29,21 @@ export async function adminCategoryRoutes(app: FastifyInstance) {
       return;
     }
 
-    const slug = normalizeSlug(parsed.data.slug);
-    if (!slug) {
-      reply.code(400).send({ message: "Invalid category input" });
-      return;
+    try {
+      const category = createCategory(app.db, parsed.data);
+      reply.code(201);
+      return { category };
+    } catch (error) {
+      if (error instanceof CategoryConflictError) {
+        reply.code(409).send({ message: error.message });
+        return;
+      }
+      if (error instanceof Error && error.message === "Invalid category slug") {
+        reply.code(400).send({ message: "Invalid category input" });
+        return;
+      }
+      throw error;
     }
-    if (getCategoryBySlug(app.db, slug)) {
-      reply.code(409).send({ message: "Category already exists" });
-      return;
-    }
-
-    const name = parsed.data.name ?? slug;
-    const now = new Date().toISOString();
-    app.db
-      .prepare(
-        `INSERT INTO categories (slug, name, updated_at)
-         VALUES (?, ?, ?)`
-      )
-      .run(slug, name, now);
-
-    const category = getCategoryBySlug(app.db, slug);
-    reply.code(201);
-    return { category };
   });
 
   app.put<{ Params: IdParams }>("/api/admin/categories/:id", async (request, reply) => {
@@ -64,33 +53,29 @@ export async function adminCategoryRoutes(app: FastifyInstance) {
       reply.code(404).send({ message: "Category not found" });
       return;
     }
-    if (!parsed.success || (!parsed.data.slug && !parsed.data.name)) {
+    if (!parsed.success) {
       reply.code(400).send({ message: "Invalid category input" });
       return;
     }
 
-    const existing = getCategoryById(app.db, id);
-    if (!existing) {
-      reply.code(404).send({ message: "Category not found" });
-      return;
+    try {
+      const category = updateCategory(app.db, id, parsed.data);
+      if (!category) {
+        reply.code(404).send({ message: "Category not found" });
+        return;
+      }
+      return { category };
+    } catch (error) {
+      if (error instanceof CategoryConflictError) {
+        reply.code(409).send({ message: error.message });
+        return;
+      }
+      if (error instanceof Error && error.message === "Invalid category slug") {
+        reply.code(400).send({ message: "Invalid category input" });
+        return;
+      }
+      throw error;
     }
-
-    const slug = parsed.data.slug === undefined ? existing.slug : normalizeSlug(parsed.data.slug);
-    if (!slug) {
-      reply.code(400).send({ message: "Invalid category input" });
-      return;
-    }
-    const conflictingCategory = getCategoryBySlug(app.db, slug);
-    if (conflictingCategory && conflictingCategory.id !== id) {
-      reply.code(409).send({ message: "Category already exists" });
-      return;
-    }
-
-    const name = parsed.data.name ?? existing.name;
-    const now = new Date().toISOString();
-    app.db.prepare("UPDATE categories SET slug = ?, name = ?, updated_at = ? WHERE id = ?").run(slug, name, now, id);
-
-    return { category: getCategoryById(app.db, id) };
   });
 
   app.delete<{ Params: IdParams }>("/api/admin/categories/:id", async (request, reply) => {
@@ -100,12 +85,18 @@ export async function adminCategoryRoutes(app: FastifyInstance) {
       return;
     }
 
-    const result = app.db.prepare("DELETE FROM categories WHERE id = ?").run(id);
-    if (result.changes === 0) {
-      reply.code(404).send({ message: "Category not found" });
-      return;
+    try {
+      if (!deleteCategory(app.db, id)) {
+        reply.code(404).send({ message: "Category not found" });
+        return;
+      }
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof CategoryReferencedError) {
+        reply.code(409).send({ message: error.message });
+        return;
+      }
+      throw error;
     }
-
-    return { ok: true };
   });
 }

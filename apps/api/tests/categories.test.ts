@@ -247,4 +247,140 @@ describe("category routes", () => {
       await app.close();
     }
   });
+
+  test("orders categories, stores localized descriptions, and reports active post counts", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const createLater = await app.inject({
+        method: "POST",
+        url: "/api/admin/categories",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "later",
+          name: "Later",
+          sortOrder: 20,
+          translations: [
+            { locale: "zh", description: "稍后阅读" },
+            { locale: "en", description: "Read later" }
+          ]
+        }
+      });
+      const createFirst = await app.inject({
+        method: "POST",
+        url: "/api/admin/categories",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "first", name: "First", sortOrder: 10, translations: [] }
+      });
+      expect(createLater.statusCode).toBe(201);
+      expect(createFirst.statusCode).toBe(201);
+      expect(createLater.json().category).toEqual(
+        expect.objectContaining({
+          sortOrder: 20,
+          postCount: 0,
+          translations: [
+            { locale: "en", description: "Read later" },
+            { locale: "zh", description: "稍后阅读" }
+          ]
+        })
+      );
+
+      for (const slug of ["counted-one", "counted-two"]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: {
+            slug,
+            status: "draft",
+            publishedAt: null,
+            categorySlug: "later",
+            tagSlugs: [],
+            translations: [{ locale: "en", title: slug, summary: "", contentMarkdown: "" }]
+          }
+        });
+        expect(response.statusCode).toBe(201);
+        if (slug === "counted-two") {
+          await app.inject({
+            method: "DELETE",
+            url: `/api/admin/posts/${response.json().post.id}`,
+            headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+          });
+        }
+      }
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/categories",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().categories.map((category: { slug: string }) => category.slug)).toEqual([
+        "first",
+        "later"
+      ]);
+      expect(listResponse.json().categories[1]).toEqual(expect.objectContaining({ postCount: 1 }));
+
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/categories/${createLater.json().category.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          sortOrder: 5,
+          translations: [{ locale: "zh", description: "更新后的描述" }]
+        }
+      });
+      expect(updateResponse.statusCode).toBe(200);
+      expect(updateResponse.json().category).toEqual(
+        expect.objectContaining({
+          sortOrder: 5,
+          translations: [{ locale: "zh", description: "更新后的描述" }]
+        })
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("blocks deleting referenced categories and deletes unreferenced categories", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const referenced = await createCategory(app, auth.cookie, auth.csrfToken, "referenced", "Referenced");
+      const unused = await createCategory(app, auth.cookie, auth.csrfToken, "unused", "Unused");
+      await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "category-reference",
+          status: "draft",
+          publishedAt: null,
+          categorySlug: "referenced",
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Reference", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      const blockedResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/categories/${referenced.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(blockedResponse.statusCode).toBe(409);
+      expect(blockedResponse.json()).toEqual({ message: "Category is referenced by posts" });
+
+      const deleteResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/categories/${unused.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(deleteResponse.statusCode).toBe(200);
+      expect(deleteResponse.json()).toEqual({ ok: true });
+    } finally {
+      await app.close();
+    }
+  });
 });

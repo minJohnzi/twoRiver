@@ -9,16 +9,80 @@ export type PostStatus = z.infer<typeof PostStatusSchema>;
 export const TagSchema = z.object({
   id: z.number().int().positive(),
   slug: SlugSchema,
-  name: z.string().min(1)
+  name: z.string().min(1),
+  postCount: z.number().int().nonnegative().optional()
 });
 export type Tag = z.infer<typeof TagSchema>;
 
 export const CategorySchema = z.object({
   id: z.number().int().positive(),
   slug: SlugSchema,
-  name: z.string().min(1)
+  name: z.string().min(1),
+  sortOrder: z.number().int().optional(),
+  postCount: z.number().int().nonnegative().optional(),
+  translations: z
+    .array(
+      z.object({
+        locale: LocaleSchema,
+        description: z.string().default("")
+      })
+    )
+    .optional()
 });
 export type Category = z.infer<typeof CategorySchema>;
+
+export const CategoryTranslationInputSchema = z.object({
+  locale: LocaleSchema,
+  description: z.string().default("")
+});
+
+const CategoryMutationFields = {
+  slug: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  sortOrder: z.number().int(),
+  translations: z.array(CategoryTranslationInputSchema)
+};
+
+export const CreateCategoryInputSchema = z
+  .object({
+    slug: CategoryMutationFields.slug,
+    name: CategoryMutationFields.name.optional(),
+    sortOrder: CategoryMutationFields.sortOrder.default(0),
+    translations: CategoryMutationFields.translations.default([])
+  })
+  .refine((value) => hasUniqueLocales(value.translations), {
+    path: ["translations"],
+    message: "Translation locales must be unique"
+  });
+export type CreateCategoryInput = z.infer<typeof CreateCategoryInputSchema>;
+
+export const UpdateCategoryInputSchema = z
+  .object({
+    slug: CategoryMutationFields.slug.optional(),
+    name: CategoryMutationFields.name.optional(),
+    sortOrder: CategoryMutationFields.sortOrder.optional(),
+    translations: CategoryMutationFields.translations.optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" })
+  .refine((value) => value.translations === undefined || hasUniqueLocales(value.translations), {
+    path: ["translations"],
+    message: "Translation locales must be unique"
+  });
+export type UpdateCategoryInput = z.infer<typeof UpdateCategoryInputSchema>;
+
+export const CreateTagInputSchema = z.object({
+  slug: z.string().trim().min(1),
+  name: z.string().trim().min(1).optional()
+});
+export type CreateTagInput = z.infer<typeof CreateTagInputSchema>;
+
+export const UpdateTagInputSchema = z
+  .object({
+    slug: z.string().trim().min(1).optional(),
+    name: z.string().trim().min(1).optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" });
+export type UpdateTagInput = z.infer<typeof UpdateTagInputSchema>;
 
 export const PostTranslationSchema = z.object({
   locale: LocaleSchema,

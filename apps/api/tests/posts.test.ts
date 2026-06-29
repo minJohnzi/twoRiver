@@ -1466,4 +1466,65 @@ describe("tag routes", () => {
       await app.close();
     }
   });
+
+  test("reports active tag usage and blocks deleting referenced tags", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const createTagResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "protected-tag", name: "Protected" }
+      });
+      expect(createTagResponse.statusCode).toBe(201);
+      expect(createTagResponse.json().tag).toEqual(expect.objectContaining({ postCount: 0 }));
+
+      const createPostResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "tag-reference",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: ["protected-tag"],
+          translations: [{ locale: "en", title: "Tag reference", summary: "", contentMarkdown: "" }]
+        }
+      });
+      expect(createPostResponse.statusCode).toBe(201);
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.json().tags).toEqual([
+        expect.objectContaining({ slug: "protected-tag", postCount: 1 })
+      ]);
+
+      const blockedResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/admin/tags/${createTagResponse.json().tag.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(blockedResponse.statusCode).toBe(409);
+      expect(blockedResponse.json()).toEqual({ message: "Tag is referenced by posts" });
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${createPostResponse.json().post.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      const afterTrashResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie }
+      });
+      expect(afterTrashResponse.json().tags[0]).toEqual(expect.objectContaining({ postCount: 0 }));
+    } finally {
+      await app.close();
+    }
+  });
 });
