@@ -8,10 +8,12 @@ import type { BlogDatabase } from "./db/connection.js";
 import authPlugin from "./plugins/auth.js";
 import { adminAboutRoutes, publicAboutRoutes } from "./routes/aboutRoutes.js";
 import { adminCategoryRoutes } from "./routes/adminCategoryRoutes.js";
+import { adminNavigationRoutes } from "./routes/adminNavigationRoutes.js";
 import { adminPageRoutes } from "./routes/adminPageRoutes.js";
 import { adminPostRoutes } from "./routes/adminPostRoutes.js";
 import { adminProjectRoutes } from "./routes/adminProjectRoutes.js";
 import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
+import { adminSiteSettingsRoutes } from "./routes/adminSiteSettingsRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
@@ -118,10 +120,12 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(publicAboutRoutes);
   app.register(adminAboutRoutes);
   app.register(adminCategoryRoutes);
+  app.register(adminNavigationRoutes);
   app.register(adminPageRoutes);
   app.register(adminPostRoutes, { config });
   app.register(adminProjectRoutes);
   app.register(adminResourceRoutes, { config });
+  app.register(adminSiteSettingsRoutes);
   app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
 

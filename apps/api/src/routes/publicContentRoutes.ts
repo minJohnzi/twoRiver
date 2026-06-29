@@ -1,7 +1,9 @@
 import { LocaleSchema } from "@tworiver/shared";
 import type { FastifyInstance } from "fastify";
+import { listPublicNavigationItems } from "../repositories/navigationRepository.js";
 import { getPublicPageBySlug } from "../repositories/pagesRepository.js";
 import { getPublicProjectBySlug, listPublicProjects } from "../repositories/projectsRepository.js";
+import { getPublicSiteSettings, getSiteSettings } from "../repositories/siteSettingsRepository.js";
 
 interface SlugParams {
   slug: string;
@@ -17,6 +19,19 @@ function getRequestedLocale(query: LocaleQuery): "zh" | "en" {
 }
 
 export async function publicContentRoutes(app: FastifyInstance) {
+  app.get<{ Querystring: LocaleQuery }>("/api/site", async (request) => {
+    const locale = getRequestedLocale(request.query);
+    return {
+      site: getPublicSiteSettings(app.db, locale),
+      navigation: listPublicNavigationItems(app.db, locale)
+    };
+  });
+
+  app.get("/robots.txt", async (_request, reply) => {
+    reply.type("text/plain; charset=utf-8");
+    return getSiteSettings(app.db).robotsText;
+  });
+
   app.get<{ Querystring: LocaleQuery }>("/api/projects", async (request) => ({
     projects: listPublicProjects(app.db, getRequestedLocale(request.query))
   }));
