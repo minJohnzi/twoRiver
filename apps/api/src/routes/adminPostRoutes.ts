@@ -1,5 +1,5 @@
 import { BulkPostActionInputSchema, PostLifecycleInputSchema, UpsertPostInputSchema } from "@tworiver/shared";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import {
@@ -12,12 +12,14 @@ import {
   permanentlyDeletePost,
   PostBulkTargetNotFoundError,
   PostSlugConflictError,
+  PostUpdateConflictError,
   TaxonomyNotFoundError,
   restorePost,
   trashPost,
   updatePostLifecycle,
   updatePost
 } from "../repositories/postsRepository.js";
+import { ArticleContentInputError } from "../services/articleContentService.js";
 import { AiClientNotConfiguredError, AiProviderError } from "../services/ai/aiClient.js";
 import { draftPostTranslation } from "../services/ai/translationDraftService.js";
 import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
@@ -45,13 +47,29 @@ const AdminUpsertPostInputSchema = UpsertPostInputSchema.refine((input) => input
   path: ["status"],
   message: "Hidden status has been replaced by archived"
 });
+type AdminUpsertPostInput = z.output<typeof AdminUpsertPostInputSchema>;
 
 const AdminPostLifecycleInputSchema = PostLifecycleInputSchema.refine((input) => input.status !== "hidden", {
   path: ["status"],
   message: "Hidden status has been replaced by archived"
 });
 
-function sendPostError(error: unknown, reply: FastifyReply): boolean {
+function sendPostError(error: unknown, reply: FastifyReply, log?: FastifyRequest["log"]): boolean {
+  if (error instanceof ArticleContentInputError) {
+    log?.warn(
+      {
+        contentCode: error.code,
+        contentPath: error.path
+      },
+      "Article content validation failed"
+    );
+    reply.code(400).send({ message: error.publicMessage, code: error.code, path: error.path });
+    return true;
+  }
+  if (error instanceof PostUpdateConflictError) {
+    reply.code(409).send({ message: "Post was updated elsewhere" });
+    return true;
+  }
   if (error instanceof TaxonomyNotFoundError) {
     reply.code(400).send({ message: error.message });
     return true;
@@ -66,6 +84,44 @@ function sendPostError(error: unknown, reply: FastifyReply): boolean {
   }
 
   return false;
+}
+
+function containsTiptapContent(input: AdminUpsertPostInput): boolean {
+  return input.translations.some((translation) => translation.content.format === "tiptap");
+}
+
+function rejectDisabledTiptapPublish(
+  input: AdminUpsertPostInput,
+  config: AppConfig,
+  reply: FastifyReply
+): boolean {
+  if (input.status === "published" && containsTiptapContent(input) && config.TIPTAP_PUBLISH_ENABLED !== true) {
+    reply.code(409).send({ message: "TipTap publishing is not enabled" });
+    return true;
+  }
+  return false;
+}
+
+function logPostSave(
+  request: FastifyRequest,
+  input: AdminUpsertPostInput,
+  postId: number,
+  result: "created" | "updated",
+  startedAt: number
+): void {
+  request.log.info(
+    {
+      postId,
+      locales: input.translations.map((translation) => translation.locale),
+      contentFormats: input.translations.map((translation) => translation.content.format),
+      schemaVersions: input.translations.map((translation) =>
+        translation.content.format === "tiptap" ? translation.content.schemaVersion : null
+      ),
+      result,
+      durationMs: Date.now() - startedAt
+    },
+    "Post article content saved"
+  );
 }
 
 function isQuotaOrRateLimitError(error: AiProviderError): boolean {
@@ -161,13 +217,18 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
       reply.code(400).send({ message: "Invalid post input" });
       return;
     }
+    if (rejectDisabledTiptapPublish(parsed.data, config, reply)) {
+      return;
+    }
 
     try {
+      const startedAt = Date.now();
       const post = createPost(app.db, parsed.data);
+      logPostSave(request, parsed.data, post.id, "created", startedAt);
       reply.code(201);
       return { post };
     } catch (error) {
-      if (sendPostError(error, reply)) {
+      if (sendPostError(error, reply, request.log)) {
         return;
       }
       throw error;
@@ -201,17 +262,22 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
       reply.code(400).send({ message: "Invalid post input" });
       return;
     }
+    if (rejectDisabledTiptapPublish(parsed.data, config, reply)) {
+      return;
+    }
 
     try {
+      const startedAt = Date.now();
       const post = updatePost(app.db, id, parsed.data);
       if (!post) {
         reply.code(404).send({ message: "Post not found" });
         return;
       }
 
+      logPostSave(request, parsed.data, post.id, "updated", startedAt);
       return { post };
     } catch (error) {
-      if (sendPostError(error, reply)) {
+      if (sendPostError(error, reply, request.log)) {
         return;
       }
       throw error;

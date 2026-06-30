@@ -138,6 +138,26 @@ const tiptapContent = {
   }
 };
 
+const unsafeTiptapContent = {
+  format: "tiptap" as const,
+  schemaVersion: 1,
+  doc: {
+    type: "doc" as const,
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: "Unsafe",
+            marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }]
+          }
+        ]
+      }
+    ]
+  }
+};
+
 async function createCategory(app: FastifyInstance, cookie: string, csrfToken: string, slug: string, name = slug) {
   const response = await app.inject({
     method: "POST",
@@ -606,6 +626,107 @@ describe("post routes", () => {
           translations: [{ locale: "en", title: "Stale", summary: "", content: tiptapContent }]
         })
       ).toThrow(PostUpdateConflictError);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("maps article content and stale update errors to safe responses", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const invalidContentResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "invalid-content",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Invalid", summary: "", content: unsafeTiptapContent }]
+        }
+      });
+
+      expect(invalidContentResponse.statusCode).toBe(400);
+      expect(invalidContentResponse.json()).toEqual({
+        message: "Article content is invalid",
+        code: "unsafe-link",
+        path: ["content", 0, "content", 0, "marks", 0, "attrs", "href"]
+      });
+
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "stale-update",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Original", summary: "", contentMarkdown: "Body" }]
+        }
+      });
+      expect(createResponse.statusCode).toBe(201);
+      const createdPost = createResponse.json().post;
+
+      const firstUpdateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${createdPost.id}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "stale-update",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          expectedUpdatedAt: createdPost.updatedAt,
+          translations: [{ locale: "en", title: "Updated", summary: "", contentMarkdown: "Body" }]
+        }
+      });
+      expect(firstUpdateResponse.statusCode).toBe(200);
+
+      const staleUpdateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${createdPost.id}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "stale-update",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          expectedUpdatedAt: createdPost.updatedAt,
+          translations: [{ locale: "en", title: "Stale", summary: "", contentMarkdown: "Body" }]
+        }
+      });
+
+      expect(staleUpdateResponse.statusCode).toBe(409);
+      expect(staleUpdateResponse.json()).toEqual({ message: "Post was updated elsewhere" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects publishing TipTap content until the server gate is enabled", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "blocked-tiptap-publish",
+          status: "published",
+          publishedAt: "2026-06-30T00:00:00.000Z",
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Blocked", summary: "", content: tiptapContent }]
+        }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ message: "TipTap publishing is not enabled" });
     } finally {
       await app.close();
     }

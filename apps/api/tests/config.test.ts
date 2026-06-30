@@ -58,6 +58,12 @@ describe("loadConfig", () => {
     expect(config.DEEPSEEK_API_KEY).toBe("sk-from-process");
   });
 
+  test("parses the TipTap publish gate only for the literal true value", () => {
+    expect(loadConfig({ TIPTAP_PUBLISH_ENABLED: "true" }).TIPTAP_PUBLISH_ENABLED).toBe(true);
+    expect(loadConfig({ TIPTAP_PUBLISH_ENABLED: "false" }).TIPTAP_PUBLISH_ENABLED).toBe(false);
+    expect(loadConfig({ TIPTAP_PUBLISH_ENABLED: "1" }).TIPTAP_PUBLISH_ENABLED).toBe(false);
+  });
+
   test("requires a dedicated analytics hash secret in production", () => {
     expect(() =>
       loadConfig({

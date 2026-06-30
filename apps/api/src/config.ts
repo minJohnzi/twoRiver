@@ -27,10 +27,14 @@ const ConfigSchema = z.object({
   CORS_ALLOWED_ORIGINS: z.preprocess(parseOriginList, z.array(z.string().url()).default([])),
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_BASE_URL: z.string().url().default("https://api.deepseek.com"),
-  ANALYTICS_HASH_SECRET: z.string().min(32).optional()
+  ANALYTICS_HASH_SECRET: z.string().min(32).optional(),
+  TIPTAP_PUBLISH_ENABLED: z.preprocess((value) => value === "true", z.boolean())
 });
 
-export type AppConfig = z.infer<typeof ConfigSchema>;
+type LoadedAppConfig = z.infer<typeof ConfigSchema>;
+export type AppConfig = Omit<LoadedAppConfig, "TIPTAP_PUBLISH_ENABLED"> & {
+  TIPTAP_PUBLISH_ENABLED?: boolean;
+};
 
 interface LoadConfigOptions {
   cwd?: string;
