@@ -1,10 +1,18 @@
 import type {
   AboutProfile,
+  BulkPostActionInput,
   Category,
+  CreateCategoryInput,
+  CreateTagInput,
+  DetachTaxonomyInput,
   Locale,
+  PostLifecycleInput,
   PostTranslation,
   PublicPost,
   Tag,
+  TaxonomyReference,
+  UpdateCategoryInput,
+  UpdateTagInput,
   UpsertAboutProfileInput,
   UpsertPostInput
 } from "@tworiver/shared";
@@ -22,6 +30,20 @@ export function fetchAdminPost(id: number, init?: RequestInit) {
 export function deleteAdminPost(id: number) {
   return apiRequest<{ ok: true }>(`/api/admin/posts/${id}`, {
     method: "DELETE"
+  });
+}
+
+export function bulkUpdateAdminPosts(input: BulkPostActionInput) {
+  return apiRequest<{ updated: number }>("/api/admin/posts/bulk", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function updateAdminPostLifecycle(id: number, input: PostLifecycleInput) {
+  return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}/lifecycle`, {
+    method: "PATCH",
+    body: JSON.stringify(input)
   });
 }
 
@@ -141,14 +163,14 @@ export function fetchAdminTags(init?: RequestInit) {
   return apiRequest<{ tags: Tag[] }>("/api/admin/tags", init);
 }
 
-export function createAdminTag(input: { slug: string; name: string }) {
+export function createAdminTag(input: CreateTagInput) {
   return apiRequest<{ tag: Tag }>("/api/admin/tags", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateAdminTag(id: number, input: { slug: string; name: string }) {
+export function updateAdminTag(id: number, input: UpdateTagInput) {
   return apiRequest<{ tag: Tag }>(`/api/admin/tags/${id}`, {
     method: "PUT",
     body: JSON.stringify(input)
@@ -165,14 +187,39 @@ export function fetchAdminCategories(init?: RequestInit) {
   return apiRequest<{ categories: Category[] }>("/api/admin/categories", init);
 }
 
-export function createAdminCategory(input: { slug: string; name: string }) {
+export interface TaxonomyUsageResponse {
+  activePostCount: number;
+  trashedPostCount: number;
+  totalPostCount: number;
+}
+
+export interface TaxonomyReferencesResponse extends TaxonomyUsageResponse {
+  references: TaxonomyReference[];
+}
+
+export interface DetachTaxonomyResponse extends TaxonomyUsageResponse {
+  detachedCount: number;
+}
+
+export function fetchAdminTagReferences(id: number, init?: RequestInit) {
+  return apiRequest<TaxonomyReferencesResponse>(`/api/admin/tags/${id}/references`, init);
+}
+
+export function detachAdminTagReferences(id: number, input: DetachTaxonomyInput) {
+  return apiRequest<DetachTaxonomyResponse>(`/api/admin/tags/${id}/detach`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function createAdminCategory(input: CreateCategoryInput) {
   return apiRequest<{ category: Category }>("/api/admin/categories", {
     method: "POST",
     body: JSON.stringify(input)
   });
 }
 
-export function updateAdminCategory(id: number, input: { slug: string; name: string }) {
+export function updateAdminCategory(id: number, input: UpdateCategoryInput) {
   return apiRequest<{ category: Category }>(`/api/admin/categories/${id}`, {
     method: "PUT",
     body: JSON.stringify(input)
@@ -182,5 +229,16 @@ export function updateAdminCategory(id: number, input: { slug: string; name: str
 export function deleteAdminCategory(id: number) {
   return apiRequest<{ ok: true }>(`/api/admin/categories/${id}`, {
     method: "DELETE"
+  });
+}
+
+export function fetchAdminCategoryReferences(id: number, init?: RequestInit) {
+  return apiRequest<TaxonomyReferencesResponse>(`/api/admin/categories/${id}/references`, init);
+}
+
+export function detachAdminCategoryReferences(id: number, input: DetachTaxonomyInput) {
+  return apiRequest<DetachTaxonomyResponse>(`/api/admin/categories/${id}/detach`, {
+    method: "POST",
+    body: JSON.stringify(input)
   });
 }

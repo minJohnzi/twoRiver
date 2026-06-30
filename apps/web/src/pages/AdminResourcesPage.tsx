@@ -14,10 +14,10 @@ interface AdminResourcesPageProps {
   locale: Locale;
 }
 
-type ResourceFilter = "all" | AdminResourceKind;
+type ResourceTypeFilter = "all" | "image" | "file";
 
 const ALL_FOLDERS = "__all__";
-const RESOURCE_FILTERS: ResourceFilter[] = ["all", "post-image", "about-image", "asset"];
+const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = ["all", "image", "file"];
 const RESOURCE_ACCEPT = ".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.md,.json,.woff,.woff2";
 
 function formatBytes(bytes: number): string {
@@ -41,12 +41,33 @@ function formatDate(value: string, locale: Locale): string {
   }).format(new Date(value));
 }
 
-function getKindLabel(kind: ResourceFilter, locale: Locale): string {
-  const labels: Record<ResourceFilter, { zh: string; en: string }> = {
+function isImageResource(resource: AdminResource): boolean {
+  return resource.contentType.startsWith("image/");
+}
+
+function matchesType(resource: AdminResource, filter: ResourceTypeFilter): boolean {
+  if (filter === "all") {
+    return true;
+  }
+
+  return filter === "image" ? isImageResource(resource) : !isImageResource(resource);
+}
+
+function getTypeLabel(filter: ResourceTypeFilter, locale: Locale): string {
+  const labels: Record<ResourceTypeFilter, { zh: string; en: string }> = {
     all: { zh: "全部资源", en: "All assets" },
-    "post-image": { zh: "文章图片", en: "Post images" },
-    "about-image": { zh: "关于页图片", en: "About images" },
-    asset: { zh: "资源文件", en: "Resource files" }
+    image: { zh: "图片", en: "Images" },
+    file: { zh: "附件", en: "Files" }
+  };
+
+  return labels[filter][locale];
+}
+
+function getKindLabel(kind: AdminResourceKind, locale: Locale): string {
+  const labels: Record<AdminResourceKind, { zh: string; en: string }> = {
+    "post-image": { zh: "文章图片", en: "Post image" },
+    "about-image": { zh: "关于页图片", en: "About image" },
+    asset: { zh: "资源文件", en: "Resource file" }
   };
 
   return labels[kind][locale];
@@ -72,15 +93,21 @@ function getEditableFolder(resource: AdminResource): string {
   return resource.directory.startsWith("resources/") ? resource.folder : resource.folder || resource.directory;
 }
 
+function getFileExtension(resource: AdminResource): string {
+  return resource.filename.split(".").pop()?.toUpperCase() ?? "FILE";
+}
+
 export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
   const [resources, setResources] = useState<AdminResource[]>([]);
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
-  const [filter, setFilter] = useState<ResourceFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [activeFolder, setActiveFolder] = useState(ALL_FOLDERS);
+  const [search, setSearch] = useState("");
   const [uploadFolder, setUploadFolder] = useState("general");
   const [moveFolder, setMoveFolder] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
@@ -119,16 +146,24 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
     () => Array.from(new Set(resources.map((resource) => resource.directory).filter(Boolean))).sort(),
     [resources]
   );
-  const filteredResources = useMemo(
-    () =>
-      resources.filter((resource) => {
-        const matchesKind = filter === "all" || resource.kind === filter;
-        const matchesFolder = activeFolder === ALL_FOLDERS || resource.directory === activeFolder;
-        return matchesKind && matchesFolder;
-      }),
-    [activeFolder, filter, resources]
-  );
+  const imageCount = useMemo(() => resources.filter(isImageResource).length, [resources]);
+  const fileCount = resources.length - imageCount;
+  const filteredResources = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+
+    return resources.filter((resource) => {
+      const matchesFolder = activeFolder === ALL_FOLDERS || resource.directory === activeFolder;
+      const matchesSearch =
+        keyword.length === 0 ||
+        [resource.filename, resource.directory, resource.folder, resource.contentType, resource.url]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(keyword));
+
+      return matchesType(resource, typeFilter) && matchesFolder && matchesSearch;
+    });
+  }, [activeFolder, resources, search, typeFilter]);
   const selectedResource = filteredResources.find((resource) => resource.url === selectedUrl) ?? filteredResources[0] ?? null;
+  const previewResource = previewUrl ? resources.find((resource) => resource.url === previewUrl) ?? null : null;
   const totalBytes = resources.reduce((sum, resource) => sum + resource.sizeBytes, 0);
   const visibleBytes = filteredResources.reduce((sum, resource) => sum + resource.sizeBytes, 0);
 
@@ -139,6 +174,7 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setUploadFile(event.currentTarget.files?.[0] ?? null);
     setNotice(null);
+    setError(null);
   }
 
   async function uploadResource(event: FormEvent<HTMLFormElement>) {
@@ -156,7 +192,7 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
       setResources((currentResources) => [resource, ...currentResources.filter((item) => item.url !== resource.url)]);
       setSelectedUrl(resource.url);
       setActiveFolder(resource.directory);
-      setFilter("asset");
+      setTypeFilter(isImageResource(resource) ? "image" : "file");
       setUploadFile(null);
       setFileInputKey((current) => current + 1);
       setNotice(locale === "zh" ? "资源已上传。" : "Resource uploaded.");
@@ -192,7 +228,7 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
       setResources((currentResources) => [movedResource, ...currentResources.filter((item) => item.url !== resource.url)]);
       setSelectedUrl(movedResource.url);
       setActiveFolder(movedResource.directory);
-      setFilter(movedResource.kind);
+      setTypeFilter(isImageResource(movedResource) ? "image" : "file");
       setNotice(locale === "zh" ? "资源已移动。" : "Resource moved.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to move resource");
@@ -204,6 +240,7 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
   async function copyResourceUrl(url: string) {
     await navigator.clipboard?.writeText(url);
     setCopiedUrl(url);
+    setNotice(locale === "zh" ? "链接已复制。" : "URL copied.");
   }
 
   async function deleteResource(resource: AdminResource) {
@@ -222,13 +259,14 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
     try {
       await deleteAdminResource(resource.url);
       setCopiedUrl(null);
+      setPreviewUrl((current) => (current === resource.url ? null : current));
       setResources((currentResources) => {
         const nextResources = currentResources.filter((item) => item.url !== resource.url);
         setSelectedUrl((currentSelectedUrl) => {
           if (currentSelectedUrl && currentSelectedUrl !== resource.url) {
             return currentSelectedUrl;
           }
-          return nextResources.find((item) => filter === "all" || item.kind === filter)?.url ?? nextResources[0]?.url ?? null;
+          return nextResources.find((item) => matchesType(item, typeFilter))?.url ?? nextResources[0]?.url ?? null;
         });
         return nextResources;
       });
@@ -247,35 +285,37 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
           <h1>{locale === "zh" ? "资源管理" : "Resource manager"}</h1>
           <p>
             {locale === "zh"
-              ? "集中管理文章插图、关于页头像和资源文件，按文件夹归档后可直接复制链接插入 Markdown。"
-              : "Manage post images, about-page media, and resource files. Organize folders and copy URLs into Markdown."}
+              ? "集中管理文章插图、关于页头像和附件资源，支持搜索、预览、移动、复制链接和删除。"
+              : "Manage post images, about-page media, and file assets with search, preview, moving, URL copy, and deletion."}
           </p>
         </div>
       </header>
 
-      <div className="resource-stats" aria-label={locale === "zh" ? "资源统计" : "Resource stats"}>
-        <div>
-          <span>{locale === "zh" ? "总数" : "Total"}</span>
-          <strong>{resources.length}</strong>
-        </div>
-        <div>
-          <span>{locale === "zh" ? "文件夹" : "Folders"}</span>
-          <strong>{folderOptions.length}</strong>
-        </div>
-        <div>
-          <span>{locale === "zh" ? "总大小" : "Size"}</span>
-          <strong>{formatBytes(filter === "all" && activeFolder === ALL_FOLDERS ? totalBytes : visibleBytes)}</strong>
-        </div>
-      </div>
-
-      <div className="resource-toolbar" aria-label={locale === "zh" ? "资源筛选" : "Resource filters"}>
-        <div className="resource-toolbar__filters">
-          {RESOURCE_FILTERS.map((item) => (
-            <button className={filter === item ? "is-active" : undefined} type="button" key={item} onClick={() => setFilter(item)}>
-              {getKindLabel(item, locale)}
+      <div className="resource-toolbar resource-toolbar--library" aria-label={locale === "zh" ? "资源筛选" : "Resource filters"}>
+        <div className="resource-type-tabs" role="tablist" aria-label={locale === "zh" ? "资源类型" : "Resource type"}>
+          {RESOURCE_TYPE_FILTERS.map((item) => (
+            <button
+              aria-selected={typeFilter === item}
+              className={typeFilter === item ? "is-active" : undefined}
+              role="tab"
+              type="button"
+              key={item}
+              onClick={() => setTypeFilter(item)}
+            >
+              {getTypeLabel(item, locale)}
             </button>
           ))}
         </div>
+
+        <label className="resource-search-field">
+          <span aria-hidden="true">⌕</span>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.currentTarget.value)}
+            placeholder={locale === "zh" ? "搜索文件名、目录或类型" : "Search filename, folder, or type"}
+          />
+        </label>
+
         <label className="resource-folder-filter">
           <span>{locale === "zh" ? "文件夹" : "Folder"}</span>
           <select value={activeFolder} onChange={(event) => setActiveFolder(event.currentTarget.value)}>
@@ -287,19 +327,51 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
             ))}
           </select>
         </label>
+
+        <label className="resource-upload-shortcut" htmlFor="resource-upload-input">
+          <span aria-hidden="true">↑</span>
+          {locale === "zh" ? "上传资源" : "Upload"}
+        </label>
+      </div>
+
+      <div className="resource-stats resource-stats--compact" aria-label={locale === "zh" ? "资源统计" : "Resource stats"}>
+        <div>
+          <span>{locale === "zh" ? "总数" : "Total"}</span>
+          <strong>{resources.length}</strong>
+        </div>
+        <div>
+          <span>{locale === "zh" ? "图片" : "Images"}</span>
+          <strong>{imageCount}</strong>
+        </div>
+        <div>
+          <span>{locale === "zh" ? "附件" : "Files"}</span>
+          <strong>{fileCount}</strong>
+        </div>
+        <div>
+          <span>{locale === "zh" ? "占用空间" : "Storage"}</span>
+          <strong>{formatBytes(typeFilter === "all" && activeFolder === ALL_FOLDERS && !search ? totalBytes : visibleBytes)}</strong>
+        </div>
       </div>
 
       <div className="admin-board admin-resources__board">
         <div className="admin-board__main">
           <form className="resource-upload-panel" onSubmit={uploadResource}>
             <div className="resource-upload-panel__heading">
-              <h2>{locale === "zh" ? "上传资源" : "Upload resource"}</h2>
+              <h2>{locale === "zh" ? "上传到资源库" : "Upload to library"}</h2>
               <span>{uploadFile?.name ?? (locale === "zh" ? "未选择文件" : "No file selected")}</span>
             </div>
             <div className="resource-upload-grid">
-              <label className="resource-file-picker">
+              <input
+                className="resource-file-input"
+                id="resource-upload-input"
+                key={fileInputKey}
+                type="file"
+                accept={RESOURCE_ACCEPT}
+                onChange={handleFileChange}
+              />
+              <label className="resource-file-picker" htmlFor="resource-upload-input">
                 <span>{locale === "zh" ? "选择文件" : "Choose file"}</span>
-                <input key={fileInputKey} type="file" accept={RESOURCE_ACCEPT} onChange={handleFileChange} />
+                <strong>{uploadFile?.name ?? (locale === "zh" ? "点击选择本地文件" : "Select a local file")}</strong>
               </label>
               <label>
                 <span>{locale === "zh" ? "目标文件夹" : "Target folder"}</span>
@@ -313,8 +385,10 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
           </form>
 
           <div className="admin-section-head">
-            <h2>{getKindLabel(filter, locale)}</h2>
-            <span>{formatBytes(visibleBytes)}</span>
+            <h2>{getTypeLabel(typeFilter, locale)}</h2>
+            <span>
+              {filteredResources.length} {locale === "zh" ? "项" : "items"} · {formatBytes(visibleBytes)}
+            </span>
           </div>
 
           <div className="resource-grid">
@@ -328,51 +402,81 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
             {!isLoading && !error && filteredResources.length === 0 ? (
               <div className="admin-table__message admin-table__empty">
                 <strong>{locale === "zh" ? "没有找到资源" : "No resources found"}</strong>
-                <span>{locale === "zh" ? "上传资源后会出现在这里。" : "Uploaded resources will appear here."}</span>
+                <span>{locale === "zh" ? "调整筛选条件，或上传新的资源文件。" : "Adjust filters or upload a new resource file."}</span>
               </div>
             ) : null}
-            {error ? <p className="error-text" role="alert">{error}</p> : null}
+            {error ? (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
+            ) : null}
             {!isLoading && !error
-              ? filteredResources.map((resource) => (
-                  <button
-                    className={`resource-card${selectedResource?.url === resource.url ? " is-active" : ""}`}
-                    type="button"
-                    key={resource.url}
-                    onClick={() => setSelectedUrl(resource.url)}
-                  >
-                    <span className="resource-card__thumb">
-                      {resource.contentType.startsWith("image/") ? (
-                        <img src={resolveApiAssetUrl(resource.url)} alt="" loading="lazy" />
-                      ) : (
-                        <span>{resource.filename.split(".").pop()?.toUpperCase() ?? "FILE"}</span>
-                      )}
-                    </span>
-                    <span className="resource-card__body">
-                      <strong>{resource.filename}</strong>
-                      <span>{getDirectoryLabel(resource, locale)}</span>
-                      <small>{formatBytes(resource.sizeBytes)}</small>
-                    </span>
-                  </button>
-                ))
+              ? filteredResources.map((resource) => {
+                  const isImage = isImageResource(resource);
+
+                  return (
+                    <article className={`resource-card${selectedResource?.url === resource.url ? " is-active" : ""}`} key={resource.url}>
+                      <button className="resource-card__select" type="button" onClick={() => setSelectedUrl(resource.url)}>
+                        <span className="resource-card__thumb">
+                          {isImage ? (
+                            <img src={resolveApiAssetUrl(resource.url)} alt="" loading="lazy" />
+                          ) : (
+                            <span>{getFileExtension(resource)}</span>
+                          )}
+                        </span>
+                        <span className="resource-card__body">
+                          <strong>{resource.filename}</strong>
+                          <span>{getDirectoryLabel(resource, locale)}</span>
+                          <small>
+                            {getKindLabel(resource.kind, locale)} · {formatBytes(resource.sizeBytes)}
+                          </small>
+                        </span>
+                      </button>
+                      <div className="resource-card__overlay" aria-label={locale === "zh" ? "资源操作" : "Resource actions"}>
+                        {isImage ? (
+                          <button type="button" title={locale === "zh" ? "预览" : "Preview"} onClick={() => setPreviewUrl(resource.url)}>
+                            ⛶
+                          </button>
+                        ) : null}
+                        <button type="button" title={locale === "zh" ? "复制链接" : "Copy URL"} onClick={() => void copyResourceUrl(resource.url)}>
+                          ⧉
+                        </button>
+                        <a href={resolveApiAssetUrl(resource.url)} title={locale === "zh" ? "打开" : "Open"} target="_blank" rel="noreferrer">
+                          ↗
+                        </a>
+                        <button
+                          type="button"
+                          title={locale === "zh" ? "删除" : "Delete"}
+                          disabled={isDeleting}
+                          onClick={() => void deleteResource(resource)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
               : null}
           </div>
         </div>
 
         <aside className="admin-side-panel resource-detail">
           <div className="admin-side-panel__heading">
-            <h2>{locale === "zh" ? "资源预览" : "Preview"}</h2>
+            <h2>{locale === "zh" ? "资源详情" : "Asset details"}</h2>
             <span>{selectedResource ? getKindLabel(selectedResource.kind, locale) : "--"}</span>
           </div>
 
           {selectedResource ? (
             <>
-              <div className="resource-detail__preview">
-                {selectedResource.contentType.startsWith("image/") ? (
+              {isImageResource(selectedResource) ? (
+                <button className="resource-detail__preview" type="button" onClick={() => setPreviewUrl(selectedResource.url)}>
                   <img src={resolveApiAssetUrl(selectedResource.url)} alt={selectedResource.filename} />
-                ) : (
+                </button>
+              ) : (
+                <div className="resource-detail__preview">
                   <span>{selectedResource.filename}</span>
-                )}
-              </div>
+                </div>
+              )}
               <dl className="resource-meta">
                 <div>
                   <dt>{locale === "zh" ? "文件名" : "Filename"}</dt>
@@ -430,6 +534,23 @@ export function AdminResourcesPage({ locale }: AdminResourcesPageProps) {
           )}
         </aside>
       </div>
+
+      {previewResource && isImageResource(previewResource) ? (
+        <div className="resource-preview-backdrop" role="dialog" aria-modal="true" aria-label={previewResource.filename}>
+          <div className="resource-preview-dialog">
+            <header>
+              <div>
+                <h2>{previewResource.filename}</h2>
+                <span>{getDirectoryLabel(previewResource, locale)}</span>
+              </div>
+              <button type="button" aria-label={locale === "zh" ? "关闭预览" : "Close preview"} onClick={() => setPreviewUrl(null)}>
+                ×
+              </button>
+            </header>
+            <img src={resolveApiAssetUrl(previewResource.url)} alt={previewResource.filename} />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

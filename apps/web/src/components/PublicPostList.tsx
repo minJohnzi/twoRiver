@@ -1,5 +1,6 @@
 import type { Locale, PostTranslation, PublicPostListItem } from "@tworiver/shared";
 import { Link } from "react-router-dom";
+import { getTaxonomyDisplayName } from "../utils/taxonomy";
 
 interface PublicPostListProps {
   posts: PublicPostListItem[];
@@ -48,7 +49,7 @@ export function PublicPostList({ posts, locale, emptyMessage }: PublicPostListPr
           <article className="post-list__item" key={post.id}>
             <div className="post-row-meta">
               <time dateTime={post.publishedAt ?? undefined}>{formatDate(post.publishedAt, locale)}</time>
-              {post.category ? <span>{post.category.name}</span> : null}
+              {post.category ? <span>{getTaxonomyDisplayName(post.category, locale)}</span> : null}
             </div>
 
             <div className="post-list__content">
@@ -62,7 +63,7 @@ export function PublicPostList({ posts, locale, emptyMessage }: PublicPostListPr
               <div className="post-list__tags" aria-label={locale === "zh" ? "文章标签" : "Post tags"}>
                 {post.tags.map((tag) => (
                   <span className="post-chip" key={tag.slug}>
-                    {tag.name}
+                    {getTaxonomyDisplayName(tag, locale)}
                   </span>
                 ))}
               </div>

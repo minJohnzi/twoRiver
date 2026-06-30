@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("admin parity migration", () => {
-  test("preserves legacy content, converts hidden posts, creates the v2 schema, and stays idempotent", () => {
+  test("preserves legacy content, converts hidden posts, creates the latest schema, and stays idempotent", () => {
     const databasePath = createDatabasePath();
     const legacyDb = openDatabase(databasePath);
     legacyDb.exec(`
@@ -107,6 +107,7 @@ describe("admin parity migration", () => {
       for (const table of [
         "schema_migrations",
         "category_translations",
+        "tag_translations",
         "pages",
         "page_translations",
         "projects",
@@ -129,10 +130,99 @@ describe("admin parity migration", () => {
         expect(tables, `${table} should exist`).toContain(table);
       }
 
-      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2]);
+      const categoryTranslationColumns = new Set(
+        (db.pragma("table_info(category_translations)") as Array<{ name: string }>).map((column) => column.name)
+      );
+      expect(categoryTranslationColumns).toContain("name");
+
+      const tagTranslationColumns = new Set(
+        (db.pragma("table_info(tag_translations)") as Array<{ name: string }>).map((column) => column.name)
+      );
+      expect(tagTranslationColumns).toEqual(new Set(["tag_id", "locale", "name"]));
+
+      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4]);
       expect(db.pragma("foreign_key_check")).toEqual([]);
     } finally {
       db.close();
+    }
+  });
+
+  test("adds normalized taxonomy name uniqueness as migration v3", () => {
+    const databasePath = createDatabasePath();
+    migrate(databasePath);
+
+    const db = openDatabase(databasePath);
+    try {
+      const indexes = new Set(
+        (
+          db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL")
+            .all() as Array<{ name: string }>
+        ).map((row) => row.name)
+      );
+
+      expect(indexes).toContain("idx_categories_name_normalized");
+      expect(indexes).toContain("idx_tags_name_normalized");
+      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4]);
+
+      const now = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO categories (slug, name, sort_order, created_at, updated_at) VALUES (?, ?, 0, ?, ?)"
+      ).run("react", "React", now, now);
+      expect(() =>
+        db
+          .prepare("INSERT INTO categories (slug, name, sort_order, created_at, updated_at) VALUES (?, ?, 0, ?, ?)")
+          .run("react-notes", " react ", now, now)
+      ).toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports legacy taxonomy name conflicts without merging records", () => {
+    const databasePath = createDatabasePath();
+    const db = openDatabase(databasePath);
+    const now = new Date().toISOString();
+    db.exec(`
+      CREATE TABLE categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO categories (slug, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(
+      "react",
+      "React",
+      now,
+      now
+    );
+    db.prepare("INSERT INTO categories (slug, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run(
+      "react-notes",
+      " react ",
+      now,
+      now
+    );
+    db.close();
+
+    expect(() => migrate(databasePath)).toThrow(/category name conflicts.*react.*react-notes/i);
+
+    const preservedDb = openDatabase(databasePath);
+    try {
+      expect(preservedDb.prepare("SELECT slug FROM categories ORDER BY id").pluck().all()).toEqual([
+        "react",
+        "react-notes"
+      ]);
+    } finally {
+      preservedDb.close();
     }
   });
 });

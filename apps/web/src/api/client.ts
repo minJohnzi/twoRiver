@@ -1,4 +1,4 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "http://localhost:4000" : "");
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const CSRF_COOKIE_NAME = "tworiver_csrf";
 const PUBLIC_GET_CACHE_TTL_MS = 30_000;
 const MAX_PUBLIC_GET_CACHE_ENTRIES = 48;

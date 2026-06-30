@@ -1,12 +1,74 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiRequest } from "./client";
 import {
+  detachAdminCategoryReferences,
+  detachAdminTagReferences,
   deleteAdminResource,
+  fetchAdminCategoryReferences,
+  fetchAdminTagReferences,
   moveAdminResource,
   uploadAdminAboutAvatar,
   uploadAdminPostImage,
   uploadAdminResource
 } from "./admin";
+
+describe("admin taxonomy API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("loads and selectively detaches category and tag references", async () => {
+    const referencesResponse = {
+      references: [
+        {
+          id: 3,
+          slug: "linked-post",
+          status: "draft",
+          deletedAt: null,
+          titles: { en: "Linked post" }
+        }
+      ],
+      activePostCount: 1,
+      trashedPostCount: 0,
+      totalPostCount: 1
+    };
+    const detachResponse = {
+      detachedCount: 1,
+      activePostCount: 0,
+      trashedPostCount: 0,
+      totalPostCount: 0
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(referencesResponse), { headers: { "Content-Type": "application/json" } })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(detachResponse), { headers: { "Content-Type": "application/json" } })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(referencesResponse), { headers: { "Content-Type": "application/json" } })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(detachResponse), { headers: { "Content-Type": "application/json" } })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAdminCategoryReferences(8);
+    await detachAdminCategoryReferences(8, { postIds: [3] });
+    await fetchAdminTagReferences(9);
+    await detachAdminTagReferences(9, { postIds: [3] });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/admin/categories/8/references",
+      "/api/admin/categories/8/detach",
+      "/api/admin/tags/9/references",
+      "/api/admin/tags/9/detach"
+    ]);
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBe(JSON.stringify({ postIds: [3] }));
+    expect((fetchMock.mock.calls[3]?.[1] as RequestInit).body).toBe(JSON.stringify({ postIds: [3] }));
+  });
+});
 
 describe("admin upload API", () => {
   afterEach(() => {

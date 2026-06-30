@@ -68,6 +68,16 @@ async function login(app: FastifyInstance): Promise<{ cookie: string; csrfToken:
   };
 }
 
+async function createTag(app: FastifyInstance, cookie: string, csrfToken: string, slug: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/admin/tags",
+    headers: { cookie, "x-csrf-token": csrfToken },
+    payload: { slug, name: slug }
+  });
+  expect(response.statusCode).toBe(201);
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -80,6 +90,7 @@ describe("publishing integration flow", () => {
 
     try {
       const { cookie, csrfToken } = await login(app);
+      await createTag(app, cookie, csrfToken, "ops");
 
       const draftResponse = await app.inject({
         method: "POST",

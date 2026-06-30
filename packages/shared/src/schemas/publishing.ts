@@ -6,11 +6,26 @@ import { DateTimeStringSchema, LocaleSchema, PaginationSchema, SlugSchema, hasUn
 export const PostStatusSchema = z.enum(["draft", "published", "hidden", "archived"]);
 export type PostStatus = z.infer<typeof PostStatusSchema>;
 
+const TaxonomyUsageFields = {
+  postCount: z.number().int().nonnegative().optional(),
+  activePostCount: z.number().int().nonnegative().optional(),
+  trashedPostCount: z.number().int().nonnegative().optional(),
+  totalPostCount: z.number().int().nonnegative().optional()
+};
+
 export const TagSchema = z.object({
   id: z.number().int().positive(),
   slug: SlugSchema,
   name: z.string().min(1),
-  postCount: z.number().int().nonnegative().optional()
+  ...TaxonomyUsageFields,
+  translations: z
+    .array(
+      z.object({
+        locale: LocaleSchema,
+        name: z.string().default("")
+      })
+    )
+    .optional()
 });
 export type Tag = z.infer<typeof TagSchema>;
 
@@ -19,11 +34,12 @@ export const CategorySchema = z.object({
   slug: SlugSchema,
   name: z.string().min(1),
   sortOrder: z.number().int().optional(),
-  postCount: z.number().int().nonnegative().optional(),
+  ...TaxonomyUsageFields,
   translations: z
     .array(
       z.object({
         locale: LocaleSchema,
+        name: z.string().default("").optional(),
         description: z.string().default("")
       })
     )
@@ -33,7 +49,12 @@ export type Category = z.infer<typeof CategorySchema>;
 
 export const CategoryTranslationInputSchema = z.object({
   locale: LocaleSchema,
+  name: z.string().trim().default(""),
   description: z.string().default("")
+});
+export const TagTranslationInputSchema = z.object({
+  locale: LocaleSchema,
+  name: z.string().trim().default("")
 });
 
 const CategoryMutationFields = {
@@ -70,19 +91,61 @@ export const UpdateCategoryInputSchema = z
   });
 export type UpdateCategoryInput = z.infer<typeof UpdateCategoryInputSchema>;
 
-export const CreateTagInputSchema = z.object({
+const TagMutationFields = {
   slug: z.string().trim().min(1),
-  name: z.string().trim().min(1).optional()
-});
+  name: z.string().trim().min(1),
+  translations: z.array(TagTranslationInputSchema)
+};
+
+export const CreateTagInputSchema = z
+  .object({
+    slug: TagMutationFields.slug,
+    name: TagMutationFields.name.optional(),
+    translations: TagMutationFields.translations.default([])
+  })
+  .refine((value) => hasUniqueLocales(value.translations), {
+    path: ["translations"],
+    message: "Translation locales must be unique"
+  });
 export type CreateTagInput = z.infer<typeof CreateTagInputSchema>;
 
 export const UpdateTagInputSchema = z
   .object({
-    slug: z.string().trim().min(1).optional(),
-    name: z.string().trim().min(1).optional()
+    slug: TagMutationFields.slug.optional(),
+    name: TagMutationFields.name.optional(),
+    translations: TagMutationFields.translations.optional()
   })
-  .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" });
+  .refine((value) => Object.keys(value).length > 0, { message: "At least one field is required" })
+  .refine((value) => value.translations === undefined || hasUniqueLocales(value.translations), {
+    path: ["translations"],
+    message: "Translation locales must be unique"
+  });
 export type UpdateTagInput = z.infer<typeof UpdateTagInputSchema>;
+
+export const TaxonomyReferenceSchema = z.object({
+  id: z.number().int().positive(),
+  slug: SlugSchema,
+  status: PostStatusSchema,
+  deletedAt: DateTimeStringSchema.nullable(),
+  titles: z
+    .object({
+      zh: z.string().min(1).optional(),
+      en: z.string().min(1).optional()
+    })
+    .refine((titles) => Boolean(titles.zh || titles.en), { message: "At least one title is required" })
+});
+export type TaxonomyReference = z.infer<typeof TaxonomyReferenceSchema>;
+
+export const DetachTaxonomyInputSchema = z.object({
+  postIds: z
+    .array(z.number().int().positive())
+    .min(1)
+    .max(100)
+    .refine((postIds) => new Set(postIds).size === postIds.length, {
+      message: "Post ids must be unique"
+    })
+});
+export type DetachTaxonomyInput = z.infer<typeof DetachTaxonomyInputSchema>;
 
 export const PostTranslationSchema = z.object({
   locale: LocaleSchema,

@@ -10,7 +10,8 @@ export default defineConfig(({ command }) => ({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://localhost:4000"
+      "/api": "http://localhost:4000",
+      "/uploads": "http://localhost:4000"
     }
   },
   build: {

@@ -9,12 +9,16 @@ import { normalizeSlug } from "../services/slugService.js";
 
 export interface CategoryTranslationRecord {
   locale: Locale;
+  name?: string;
   description: string;
 }
 
 export interface CategoryRecord extends Category {
   sortOrder: number;
   postCount: number;
+  activePostCount: number;
+  trashedPostCount: number;
+  totalPostCount: number;
   translations: CategoryTranslationRecord[];
 }
 
@@ -23,12 +27,15 @@ interface CategoryRow {
   slug: string;
   name: string;
   sort_order: number;
-  post_count: number;
+  active_post_count: number;
+  trashed_post_count: number;
+  total_post_count: number;
 }
 
 interface CategoryTranslationRow {
   category_id: number;
   locale: Locale;
+  name: string;
   description: string;
 }
 
@@ -52,7 +59,9 @@ const CATEGORY_SELECT = `
     c.slug,
     c.name,
     c.sort_order,
-    COUNT(DISTINCT CASE WHEN p.deleted_at IS NULL THEN p.id END) AS post_count
+    COUNT(DISTINCT CASE WHEN p.deleted_at IS NULL THEN p.id END) AS active_post_count,
+    COUNT(DISTINCT CASE WHEN p.deleted_at IS NOT NULL THEN p.id END) AS trashed_post_count,
+    COUNT(DISTINCT p.id) AS total_post_count
   FROM categories c
   LEFT JOIN posts p ON p.category_id = c.id
 `;
@@ -65,7 +74,7 @@ function hydrateCategories(db: BlogDatabase, rows: CategoryRow[]): CategoryRecor
   const ids = rows.map((row) => row.id);
   const translations = db
     .prepare(
-      `SELECT category_id, locale, description
+      `SELECT category_id, locale, name, description
        FROM category_translations
        WHERE category_id IN (${ids.map(() => "?").join(", ")})
        ORDER BY locale ASC`
@@ -74,7 +83,11 @@ function hydrateCategories(db: BlogDatabase, rows: CategoryRow[]): CategoryRecor
   const translationsByCategory = new Map<number, CategoryTranslationRecord[]>();
   for (const translation of translations) {
     const existing = translationsByCategory.get(translation.category_id) ?? [];
-    existing.push({ locale: translation.locale, description: translation.description });
+    existing.push({
+      locale: translation.locale,
+      ...(translation.name.trim() ? { name: translation.name } : {}),
+      description: translation.description
+    });
     translationsByCategory.set(translation.category_id, existing);
   }
 
@@ -83,7 +96,10 @@ function hydrateCategories(db: BlogDatabase, rows: CategoryRow[]): CategoryRecor
     slug: row.slug,
     name: row.name,
     sortOrder: row.sort_order,
-    postCount: row.post_count,
+    postCount: row.active_post_count,
+    activePostCount: row.active_post_count,
+    trashedPostCount: row.trashed_post_count,
+    totalPostCount: row.total_post_count,
     translations: translationsByCategory.get(row.id) ?? []
   }));
 }
@@ -95,11 +111,11 @@ function replaceTranslations(
 ): void {
   db.prepare("DELETE FROM category_translations WHERE category_id = ?").run(categoryId);
   const insert = db.prepare(
-    `INSERT INTO category_translations (category_id, locale, description)
-     VALUES (?, ?, ?)`
+    `INSERT INTO category_translations (category_id, locale, name, description)
+     VALUES (?, ?, ?, ?)`
   );
   for (const translation of translations) {
-    insert.run(categoryId, translation.locale, translation.description);
+    insert.run(categoryId, translation.locale, translation.name?.trim() ?? "", translation.description);
   }
 }
 
@@ -124,14 +140,24 @@ export function getCategoryById(db: BlogDatabase, id: number): CategoryRecord | 
   return row ? hydrateCategories(db, [row])[0] : undefined;
 }
 
+function getCategoryByName(db: BlogDatabase, name: string): CategoryRecord | undefined {
+  const row = db
+    .prepare(`${CATEGORY_SELECT} WHERE lower(trim(c.name)) = lower(trim(?)) GROUP BY c.id`)
+    .get(name) as CategoryRow | undefined;
+  return row ? hydrateCategories(db, [row])[0] : undefined;
+}
+
 export function createCategory(db: BlogDatabase, input: CreateCategoryInput): CategoryRecord {
   const slug = normalizeSlug(input.slug);
   if (!slug) {
     throw new Error("Invalid category slug");
   }
 
+  const translatedName = input.translations.find((translation) => translation.name.trim())?.name.trim();
+  const name = input.name ?? translatedName ?? slug;
+
   return db.transaction(() => {
-    if (getCategoryBySlug(db, slug)) {
+    if (getCategoryBySlug(db, slug) || getCategoryByName(db, name)) {
       throw new CategoryConflictError();
     }
 
@@ -141,7 +167,7 @@ export function createCategory(db: BlogDatabase, input: CreateCategoryInput): Ca
         `INSERT INTO categories (slug, name, sort_order, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(slug, input.name ?? slug, input.sortOrder, now, now);
+      .run(slug, name, input.sortOrder, now, now);
     const categoryId = Number(result.lastInsertRowid);
     replaceTranslations(db, categoryId, input.translations);
     return getCategoryById(db, categoryId) as CategoryRecord;
@@ -163,8 +189,10 @@ export function updateCategory(
     if (!slug) {
       throw new Error("Invalid category slug");
     }
+    const name = input.name ?? existing.name;
     const conflict = getCategoryBySlug(db, slug);
-    if (conflict && conflict.id !== id) {
+    const nameConflict = getCategoryByName(db, name);
+    if ((conflict && conflict.id !== id) || (nameConflict && nameConflict.id !== id)) {
       throw new CategoryConflictError();
     }
 
@@ -172,7 +200,7 @@ export function updateCategory(
       `UPDATE categories
        SET slug = ?, name = ?, sort_order = ?, updated_at = ?
        WHERE id = ?`
-    ).run(slug, input.name ?? existing.name, input.sortOrder ?? existing.sortOrder, new Date().toISOString(), id);
+    ).run(slug, name, input.sortOrder ?? existing.sortOrder, new Date().toISOString(), id);
     if (input.translations !== undefined) {
       replaceTranslations(db, id, input.translations);
     }

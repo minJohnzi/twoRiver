@@ -1,0 +1,7 @@
+@import "@fontsource-variable/noto-serif-sc/wght.css";
+
+:root {
+  --font-serif: "Noto Serif SC Variable", "Noto Serif", "Noto Serif SC", Georgia, "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+}

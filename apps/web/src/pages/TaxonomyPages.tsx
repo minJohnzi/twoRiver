@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCategories, fetchCategoryDetail, fetchTagDetail, fetchTags } from "../api/posts";
 import { PublicPostList } from "../components/PublicPostList";
+import { getTaxonomyDisplayName } from "../utils/taxonomy";
 
 interface LocaleProps {
   locale: Locale;
@@ -42,12 +43,16 @@ function TaxonomyList<TItem extends Category | Tag>({
       ) : null}
       {!isLoading && items.length > 0 ? (
         <div className="taxonomy-grid">
-          {items.map((item) => (
-            <Link aria-label={item.name} className="taxonomy-card" key={item.id} to={`/${basePath}/${item.slug}`}>
-              <strong>{item.name}</strong>
-              <span>{item.slug}</span>
-            </Link>
-          ))}
+          {items.map((item) => {
+            const displayName = getTaxonomyDisplayName(item, locale);
+
+            return (
+              <Link aria-label={displayName} className="taxonomy-card" key={item.id} to={`/${basePath}/${item.slug}`}>
+                <strong>{displayName}</strong>
+                <span>{item.slug}</span>
+              </Link>
+            );
+          })}
         </div>
       ) : null}
     </section>
@@ -88,7 +93,7 @@ export function CategoryListPage({ locale }: LocaleProps) {
     return <p className="error-text">{error}</p>;
   }
 
-  return <TaxonomyList title="Categories" items={categories} basePath="categories" isLoading={isLoading} locale={locale} />;
+  return <TaxonomyList title={locale === "zh" ? "分类" : "Categories"} items={categories} basePath="categories" isLoading={isLoading} locale={locale} />;
 }
 
 export function TagListPage({ locale }: LocaleProps) {
@@ -125,7 +130,7 @@ export function TagListPage({ locale }: LocaleProps) {
     return <p className="error-text">{error}</p>;
   }
 
-  return <TaxonomyList title="Tags" items={tags} basePath="tags" isLoading={isLoading} locale={locale} />;
+  return <TaxonomyList title={locale === "zh" ? "标签" : "Tags"} items={tags} basePath="tags" isLoading={isLoading} locale={locale} />;
 }
 
 export function CategoryDetailPage({ locale }: LocaleProps) {
@@ -171,7 +176,7 @@ export function CategoryDetailPage({ locale }: LocaleProps) {
         <Link className="back-link" to="/categories">
           {locale === "zh" ? "返回分类" : "Back to categories"}
         </Link>
-        <h1>{category?.name ?? slug}</h1>
+        <h1>{category ? getTaxonomyDisplayName(category, locale) : slug}</h1>
         <p aria-live="polite">{isLoading ? (locale === "zh" ? "正在读取..." : "Loading...") : locale === "zh" ? `${posts.length} 篇记录` : `${posts.length} ${posts.length === 1 ? "note" : "notes"}`}</p>
       </header>
       {isLoading ? <PostListSkeleton /> : <PostLinks locale={locale} posts={posts} />}
@@ -222,7 +227,7 @@ export function TagDetailPage({ locale }: LocaleProps) {
         <Link className="back-link" to="/tags">
           {locale === "zh" ? "返回标签" : "Back to tags"}
         </Link>
-        <h1>{tag?.name ?? slug}</h1>
+        <h1>{tag ? getTaxonomyDisplayName(tag, locale) : slug}</h1>
         <p aria-live="polite">{isLoading ? (locale === "zh" ? "正在读取..." : "Loading...") : locale === "zh" ? `${posts.length} 篇记录` : `${posts.length} ${posts.length === 1 ? "note" : "notes"}`}</p>
       </header>
       {isLoading ? <PostListSkeleton /> : <PostLinks locale={locale} posts={posts} />}

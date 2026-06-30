@@ -93,11 +93,11 @@ pnpm dev
 | `CORS_ALLOWED_ORIGINS` | 生产环境可信浏览器来源，逗号分隔 | `https://example.me,https://www.example.me` |
 | `DEEPSEEK_API_KEY` | 可选 AI 辅助服务 API Key | 空 |
 | `DEEPSEEK_BASE_URL` | DeepSeek 兼容 API Base URL | `https://api.deepseek.com` |
-| `VITE_API_BASE_URL` | 前端 API Base URL | `http://localhost:4000` |
+| `VITE_API_BASE_URL` | 前端 API Base URL；留空时使用同源请求 | 空（推荐） |
 
 生产环境启动时会拒绝默认的 `SESSION_SECRET` 和 `ADMIN_PASSWORD`，部署前必须替换。生产环境也要求配置 `CORS_ALLOWED_ORIGINS`。
 
-如果通过 Nginx 做同源生产部署，不要设置 `VITE_API_BASE_URL`；前端应直接请求同域下的 `/api/...`。
+开发环境默认将同源的 `/api/...` 和 `/uploads/...` 请求代理到 `http://localhost:4000`，因此使用 `localhost:5173` 或 `127.0.0.1:5173` 访问时，后台会话都能正常工作。如果通过 Nginx 做同源生产部署，也不要设置 `VITE_API_BASE_URL`。
 
 上传图片和资源文件存储在 `<database-dir>/uploads/` 下，其中 `<database-dir>` 是 `DATABASE_PATH` 所在目录。备份时需要同时备份 SQLite 数据库和 `uploads/` 目录。
 

@@ -107,6 +107,28 @@ async function loginWithCsrf(app: FastifyInstance): Promise<{ cookie: string; cs
   };
 }
 
+async function createTag(app: FastifyInstance, cookie: string, csrfToken: string, slug: string, name = slug) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/admin/tags",
+    headers: { cookie, "x-csrf-token": csrfToken },
+    payload: { slug, name }
+  });
+  expect(response.statusCode).toBe(201);
+  return response.json().tag;
+}
+
+async function createCategory(app: FastifyInstance, cookie: string, csrfToken: string, slug: string, name = slug) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/admin/categories",
+    headers: { cookie, "x-csrf-token": csrfToken },
+    payload: { slug, name }
+  });
+  expect(response.statusCode).toBe(201);
+  return response.json().category;
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -280,6 +302,7 @@ describe("post routes", () => {
 
     try {
       const { cookie, csrfToken } = await loginWithCsrf(app);
+      await createTag(app, cookie, csrfToken, "news");
       const createResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
@@ -338,6 +361,9 @@ describe("post routes", () => {
     try {
       const { cookie, csrfToken } = await loginWithCsrf(app);
       const publishedAt = new Date("2026-01-02T03:04:05.000Z").toISOString();
+      await createCategory(app, cookie, csrfToken, "engineering");
+      await createTag(app, cookie, csrfToken, "culture");
+      await createTag(app, cookie, csrfToken, "river");
       const createResponse = await app.inject({
         method: "POST",
         url: "/api/admin/posts",
@@ -662,6 +688,62 @@ describe("post routes", () => {
       const visibleDetailResponse = await app.inject({ method: "GET", url: "/api/posts/temporarily-archived" });
       expect(visibleDetailResponse.statusCode).toBe(200);
       expect(visibleDetailResponse.json().post.publishedAt).toBe(publishedAt);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects unknown categories instead of creating them while saving posts", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "unknown-category-post",
+          status: "draft",
+          publishedAt: null,
+          categorySlug: "missing-category",
+          tagSlugs: [],
+          translations: [{ locale: "en", title: "Unknown category", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: 'Category "missing-category" does not exist' });
+      const categoriesResponse = await app.inject({ method: "GET", url: "/api/categories" });
+      expect(categoriesResponse.json()).toEqual({ categories: [] });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects unknown tags instead of creating them while saving posts", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "unknown-tag-post",
+          status: "draft",
+          publishedAt: null,
+          categorySlug: null,
+          tagSlugs: ["missing-tag"],
+          translations: [{ locale: "en", title: "Unknown tag", summary: "", contentMarkdown: "" }]
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ message: 'Tag "missing-tag" does not exist' });
+      const tagsResponse = await app.inject({ method: "GET", url: "/api/tags" });
+      expect(tagsResponse.json()).toEqual({ tags: [] });
     } finally {
       await app.close();
     }
@@ -1250,6 +1332,8 @@ describe("tag routes", () => {
 
     try {
       const { cookie, csrfToken } = await loginWithCsrf(app);
+      await createTag(app, cookie, csrfToken, "release");
+      await createTag(app, cookie, csrfToken, "other");
 
       await app.inject({
         method: "POST",
@@ -1307,11 +1391,19 @@ describe("tag routes", () => {
     }
   });
 
-  test("post tag creation upserts display names for matching normalized slugs", async () => {
+  test("post saves preserve existing tag display names for matching normalized slugs", async () => {
     const app = await createTestApp();
 
     try {
       const { cookie, csrfToken } = await loginWithCsrf(app);
+
+      const createTagResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: { slug: "typescript", name: "TypeScript" }
+      });
+      expect(createTagResponse.statusCode).toBe(201);
 
       const firstPostResponse = await app.inject({
         method: "POST",
@@ -1365,7 +1457,7 @@ describe("tag routes", () => {
         tags: [
           expect.objectContaining({
             slug: "typescript",
-            name: "typeSCRIPT"
+            name: "TypeScript"
           })
         ]
       });
@@ -1501,7 +1593,13 @@ describe("tag routes", () => {
         headers: { cookie: auth.cookie }
       });
       expect(listResponse.json().tags).toEqual([
-        expect.objectContaining({ slug: "protected-tag", postCount: 1 })
+        expect.objectContaining({
+          slug: "protected-tag",
+          postCount: 1,
+          activePostCount: 1,
+          trashedPostCount: 0,
+          totalPostCount: 1
+        })
       ]);
 
       const blockedResponse = await app.inject({
@@ -1522,7 +1620,131 @@ describe("tag routes", () => {
         url: "/api/admin/tags",
         headers: { cookie: auth.cookie }
       });
-      expect(afterTrashResponse.json().tags[0]).toEqual(expect.objectContaining({ postCount: 0 }));
+      expect(afterTrashResponse.json().tags[0]).toEqual(
+        expect.objectContaining({
+          postCount: 0,
+          activePostCount: 0,
+          trashedPostCount: 1,
+          totalPostCount: 1
+        })
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns conflict for normalized duplicate tag names", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const firstResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "typescript", name: "TypeScript" }
+      });
+      expect(firstResponse.statusCode).toBe(201);
+
+      const duplicateResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "typescript-guides", name: " typescript " }
+      });
+
+      expect(duplicateResponse.statusCode).toBe(409);
+      expect(duplicateResponse.json()).toEqual({ message: "Tag already exists" });
+
+      const other = await createTag(app, auth.cookie, auth.csrfToken, "react", "React");
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/tags/${other.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { name: "TYPESCRIPT" }
+      });
+      expect(updateResponse.statusCode).toBe(409);
+      expect(updateResponse.json()).toEqual({ message: "Tag already exists" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("lists tag references and selectively detaches chosen posts", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const tagResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/tags",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "typescript", name: "TypeScript" }
+      });
+      expect(tagResponse.statusCode).toBe(201);
+      const tagId = tagResponse.json().tag.id as number;
+      const postIds: number[] = [];
+
+      for (const [slug, title] of [
+        ["active-tag-reference", "Active tag reference"],
+        ["trashed-tag-reference", "Trashed tag reference"]
+      ]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: {
+            slug,
+            status: "draft",
+            publishedAt: null,
+            categorySlug: null,
+            tagSlugs: ["typescript"],
+            translations: [{ locale: "en", title, summary: "", contentMarkdown: "" }]
+          }
+        });
+        expect(response.statusCode).toBe(201);
+        postIds.push(response.json().post.id as number);
+      }
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postIds[1]}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+
+      const referencesResponse = await app.inject({
+        method: "GET",
+        url: `/api/admin/tags/${tagId}/references`,
+        headers: { cookie: auth.cookie }
+      });
+      expect(referencesResponse.statusCode).toBe(200);
+      expect(referencesResponse.json()).toEqual({
+        references: [
+          expect.objectContaining({ id: postIds[0], deletedAt: null, titles: { en: "Active tag reference" } }),
+          expect.objectContaining({
+            id: postIds[1],
+            deletedAt: expect.any(String),
+            titles: { en: "Trashed tag reference" }
+          })
+        ],
+        activePostCount: 1,
+        trashedPostCount: 1,
+        totalPostCount: 2
+      });
+
+      const detachResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/tags/${tagId}/detach`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { postIds: [postIds[0]] }
+      });
+      expect(detachResponse.statusCode).toBe(200);
+      expect(detachResponse.json()).toEqual({
+        detachedCount: 1,
+        activePostCount: 0,
+        trashedPostCount: 1,
+        totalPostCount: 1
+      });
     } finally {
       await app.close();
     }

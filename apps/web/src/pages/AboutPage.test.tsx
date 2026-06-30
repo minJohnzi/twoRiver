@@ -90,7 +90,7 @@ describe("AboutPage", () => {
     render(<AboutPage locale="en" />);
 
     const avatar = await screen.findByRole("img", { name: "TwoRiver avatar" });
-    expect(avatar).toHaveAttribute("src", "http://localhost:4000/uploads/images/about/avatar.png");
+    expect(avatar).toHaveAttribute("src", "/uploads/images/about/avatar.png");
     expect(avatar.closest(".about-file-portrait")).toHaveClass("about-file-portrait--round");
   });
 });

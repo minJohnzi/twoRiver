@@ -72,7 +72,7 @@ export function HomePage({ locale }: HomePageProps) {
 
       {tags.length > 0 ? (
         <div className="home-filter-bar">
-          <TagFilter tags={tags} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
+          <TagFilter tags={tags} locale={locale} selectedTag={selectedTag} onSelectTag={setSelectedTag} />
         </div>
       ) : null}
 

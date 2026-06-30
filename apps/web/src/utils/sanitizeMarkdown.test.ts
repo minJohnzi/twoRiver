@@ -37,7 +37,7 @@ describe("sanitizeMarkdownHtml", () => {
   it("preserves safe relative upload image URLs after API asset resolution", () => {
     const image = getSanitizedElement<HTMLImageElement>('<img src="/uploads/posts/hero.png" alt="Hero">', "img");
 
-    expect(image.getAttribute("src")).toBe("http://localhost:4000/uploads/posts/hero.png");
+    expect(image.getAttribute("src")).toBe("/uploads/posts/hero.png");
     expect(image.getAttribute("alt")).toBe("Hero");
   });
 

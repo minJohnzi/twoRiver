@@ -17,8 +17,10 @@ import {
 vi.mock("./api/admin", () => ({
   fetchAdminPosts: vi.fn(),
   fetchAdminPost: vi.fn(),
+  bulkUpdateAdminPosts: vi.fn(),
   createAdminPost: vi.fn(),
   updateAdminPost: vi.fn(),
+  updateAdminPostLifecycle: vi.fn(),
   deleteAdminPost: vi.fn(),
   fetchAdminCategories: vi.fn(),
   fetchAdminTags: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("./api/admin", () => ({
 
 vi.mock("./api/auth", () => ({
   fetchCurrentUser: vi.fn(),
+  login: vi.fn(),
   logout: vi.fn()
 }));
 
@@ -82,11 +85,11 @@ describe("admin route protection", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "进入写作中控室" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "TwoRiver" }, { timeout: 3_000 })).toBeInTheDocument();
     expect(mockedFetchAdminPosts).not.toHaveBeenCalled();
   });
 
-  it("starts the admin login form with an empty username", async () => {
+  it("starts the admin login form with an empty account", async () => {
     window.localStorage.setItem("tworiver_admin_locale", "en");
 
     render(
@@ -95,20 +98,22 @@ describe("admin route protection", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByLabelText("Username")).toHaveValue("");
+    expect(await screen.findByLabelText("Account")).toHaveValue("");
   });
 
   it("reads public and admin language preferences independently", async () => {
     window.localStorage.setItem("tworiver_locale", "en");
     window.localStorage.setItem("tworiver_admin_locale", "zh");
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
 
     const { unmount } = render(
-      <MemoryRouter initialEntries={["/admin/login"]}>
+      <MemoryRouter initialEntries={["/admin/posts"]}>
         <App />
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("button", { name: "Switch to English" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "切换到英文" })).toBeInTheDocument();
 
     unmount();
 
@@ -124,14 +129,16 @@ describe("admin route protection", () => {
   it("persists public and admin language changes independently", async () => {
     window.localStorage.setItem("tworiver_locale", "zh");
     window.localStorage.setItem("tworiver_admin_locale", "zh");
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
 
     const { unmount } = render(
-      <MemoryRouter initialEntries={["/admin/login"]}>
+      <MemoryRouter initialEntries={["/admin/posts"]}>
         <App />
       </MemoryRouter>
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Switch to English" }));
+    fireEvent.click(await screen.findByRole("button", { name: "切换到英文" }));
     expect(window.localStorage.getItem("tworiver_admin_locale")).toBe("en");
     expect(window.localStorage.getItem("tworiver_locale")).toBe("zh");
 
@@ -152,9 +159,11 @@ describe("admin route protection", () => {
   it("reads public and admin theme preferences independently", async () => {
     window.localStorage.setItem("tworiver_theme", "light");
     window.localStorage.setItem("tworiver_admin_theme", "dark");
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
 
     const { container, unmount } = render(
-      <MemoryRouter initialEntries={["/admin/login"]}>
+      <MemoryRouter initialEntries={["/admin/posts"]}>
         <App />
       </MemoryRouter>
     );
@@ -179,9 +188,11 @@ describe("admin route protection", () => {
   it("persists public and admin theme changes independently", async () => {
     window.localStorage.setItem("tworiver_theme", "dark");
     window.localStorage.setItem("tworiver_admin_theme", "dark");
+    mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
+    mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
 
     const { container, unmount } = render(
-      <MemoryRouter initialEntries={["/admin/login"]}>
+      <MemoryRouter initialEntries={["/admin/posts"]}>
         <App />
       </MemoryRouter>
     );
@@ -222,7 +233,7 @@ describe("admin route protection", () => {
     fireEvent.click(logoutButton);
 
     await waitFor(() => expect(mockedLogout).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole("heading", { name: "进入写作中控室" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "TwoRiver" }, { timeout: 3_000 })).toBeInTheDocument();
   });
   it("reuses the verified admin session across protected admin pages", async () => {
     mockedFetchCurrentUser.mockResolvedValue({ user: { id: 1, username: "admin" } });
@@ -293,7 +304,7 @@ describe("public taxonomy routes", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "Categories" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "分类" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Engineering" })).toHaveAttribute("href", "/categories/engineering");
 
     cleanup();
@@ -304,7 +315,7 @@ describe("public taxonomy routes", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("heading", { name: "Tags" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "标签" })).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "Release" })).toHaveAttribute("href", "/tags/release");
   });
 
@@ -440,7 +451,7 @@ describe("public taxonomy routes", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Published flow" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "回到开头" }));
+    fireEvent.click(screen.getByRole("button", { name: "返回顶部" }));
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });

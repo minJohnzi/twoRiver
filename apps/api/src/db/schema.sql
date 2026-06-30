@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE TABLE IF NOT EXISTS category_translations (
   category_id INTEGER NOT NULL,
   locale TEXT NOT NULL CHECK (locale IN ('zh', 'en')),
+  name TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (category_id, locale),
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
@@ -79,6 +80,14 @@ CREATE TABLE IF NOT EXISTS tags (
   name TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS tag_translations (
+  tag_id INTEGER NOT NULL,
+  locale TEXT NOT NULL CHECK (locale IN ('zh', 'en')),
+  name TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (tag_id, locale),
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS post_tags (

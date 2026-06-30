@@ -32,7 +32,8 @@ describe("public posts API", () => {
     await fetchPosts({ page: 2, limit: 5 });
 
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(new URL(url).pathname).toBe("/api/posts");
-    expect(new URL(url).search).toBe("?page=2&limit=5");
+    const parsedUrl = new URL(url, "http://localhost");
+    expect(parsedUrl.pathname).toBe("/api/posts");
+    expect(parsedUrl.search).toBe("?page=2&limit=5");
   });
 });

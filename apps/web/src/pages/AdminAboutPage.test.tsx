@@ -64,7 +64,7 @@ describe("AdminAboutPage", () => {
     await waitFor(() => expect(mockedUploadAdminAboutAvatar).toHaveBeenCalledWith(file));
     await waitFor(() => expect(screen.getAllByAltText("About avatar preview")).toHaveLength(2));
     for (const preview of screen.getAllByAltText("About avatar preview")) {
-      expect(preview).toHaveAttribute("src", "http://localhost:4000/uploads/images/about/avatar.png");
+      expect(preview).toHaveAttribute("src", "/uploads/images/about/avatar.png");
     }
 
     fireEvent.click(screen.getByRole("button", { name: "Save about" }));

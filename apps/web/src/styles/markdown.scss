@@ -1,7 +1,7 @@
 .markdown-body {
   color: var(--color-text);
   font-size: 16px;
-  line-height: 1.76;
+  line-height: 1.625;
 }
 
 .markdown-body > *:first-child {
@@ -14,22 +14,24 @@
 .markdown-body h4 {
   color: var(--color-heading);
   letter-spacing: 0;
-  line-height: 1.25;
-  margin: 2rem 0 0.75rem;
+  line-height: 1.4;
+  margin: 24px 0 8px;
+  font-weight: 500;
 }
 
 .markdown-body h1 {
-  font-size: 30px;
+  font-size: 24px;
+  line-height: 1.333;
 }
 
 .markdown-body h2 {
-  border-bottom: 1px solid var(--color-border);
-  font-size: 24px;
-  padding-bottom: 0.35rem;
+  font-size: 20px;
+  line-height: 1.4;
 }
 
 .markdown-body h3 {
-  font-size: 20px;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .markdown-body p,
@@ -38,7 +40,7 @@
 .markdown-body blockquote,
 .markdown-body pre,
 .code-window {
-  margin: 1rem 0;
+  margin: 12px 0;
 }
 
 .markdown-body ul,
@@ -47,7 +49,7 @@
 }
 
 .markdown-body li + li {
-  margin-top: 0.35rem;
+  margin-top: 0.25rem;
 }
 
 .markdown-body blockquote {
@@ -447,4 +449,62 @@
 
 .markdown-body a {
   overflow-wrap: anywhere;
+}
+
+.article-shell .markdown-body {
+  color: var(--color-muted);
+  font-size: 17px;
+  line-height: 1.78;
+}
+
+.article-shell .markdown-body h1,
+.article-shell .markdown-body h2,
+.article-shell .markdown-body h3 {
+  scroll-margin-top: 32px;
+  color: var(--color-heading);
+  font-weight: 550;
+  letter-spacing: -0.02em;
+}
+
+.article-shell .markdown-body h1 {
+  margin-top: 52px;
+  font-size: 28px;
+}
+
+.article-shell .markdown-body h2 {
+  margin-top: 44px;
+  font-size: 22px;
+}
+
+.article-shell .markdown-body h3 {
+  margin-top: 32px;
+  font-size: 18px;
+}
+
+.article-shell .markdown-body p,
+.article-shell .markdown-body ul,
+.article-shell .markdown-body ol {
+  margin-block: 16px;
+}
+
+.article-shell .code-window {
+  border-radius: 6px;
+  box-shadow: none;
+  margin-block: 24px;
+}
+
+.article-shell .window-dots {
+  display: none;
+}
+
+.article-shell .code-window-header {
+  height: 34px;
+  padding-inline: 10px;
+}
+
+.article-shell .markdown-copy-button {
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  padding-inline: 4px;
 }

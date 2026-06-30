@@ -79,6 +79,16 @@ async function createCategory(app: FastifyInstance, cookie: string, csrfToken: s
   return response.json().category as { id: number; slug: string; name: string };
 }
 
+async function createTag(app: FastifyInstance, cookie: string, csrfToken: string, slug: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/admin/tags",
+    headers: { cookie, "x-csrf-token": csrfToken },
+    payload: { slug, name: slug }
+  });
+  expect(response.statusCode).toBe(201);
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -194,6 +204,7 @@ describe("category routes", () => {
       const { cookie, csrfToken } = await loginWithCsrf(app);
       await createCategory(app, cookie, csrfToken, "engineering", "Engineering");
       await createCategory(app, cookie, csrfToken, "culture", "Culture");
+      await createTag(app, cookie, csrfToken, "release");
 
       await app.inject({
         method: "POST",
@@ -320,7 +331,14 @@ describe("category routes", () => {
         "first",
         "later"
       ]);
-      expect(listResponse.json().categories[1]).toEqual(expect.objectContaining({ postCount: 1 }));
+      expect(listResponse.json().categories[1]).toEqual(
+        expect.objectContaining({
+          postCount: 1,
+          activePostCount: 1,
+          trashedPostCount: 1,
+          totalPostCount: 2
+        })
+      );
 
       const updateResponse = await app.inject({
         method: "PUT",
@@ -379,6 +397,125 @@ describe("category routes", () => {
       });
       expect(deleteResponse.statusCode).toBe(200);
       expect(deleteResponse.json()).toEqual({ ok: true });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns a conflict for normalized duplicate category names", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      await createCategory(app, auth.cookie, auth.csrfToken, "react", "React");
+
+      const duplicateResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/categories",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { slug: "react-guides", name: " react " }
+      });
+
+      expect(duplicateResponse.statusCode).toBe(409);
+      expect(duplicateResponse.json()).toEqual({ message: "Category already exists" });
+
+      const other = await createCategory(app, auth.cookie, auth.csrfToken, "vue", "Vue");
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/categories/${other.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { name: "REACT" }
+      });
+      expect(updateResponse.statusCode).toBe(409);
+      expect(updateResponse.json()).toEqual({ message: "Category already exists" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("lists category references and selectively detaches chosen posts", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const category = await createCategory(app, auth.cookie, auth.csrfToken, "engineering", "Engineering");
+      const postIds: number[] = [];
+
+      for (const [slug, title] of [
+        ["active-reference", "正常文章"],
+        ["trashed-reference", "回收站文章"]
+      ]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/admin/posts",
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: {
+            slug,
+            status: "draft",
+            publishedAt: null,
+            categorySlug: category.slug,
+            tagSlugs: [],
+            translations: [{ locale: "zh", title, summary: "", contentMarkdown: "" }]
+          }
+        });
+        expect(response.statusCode).toBe(201);
+        postIds.push(response.json().post.id as number);
+      }
+
+      await app.inject({
+        method: "DELETE",
+        url: `/api/admin/posts/${postIds[1]}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+
+      const referencesResponse = await app.inject({
+        method: "GET",
+        url: `/api/admin/categories/${category.id}/references`,
+        headers: { cookie: auth.cookie }
+      });
+      expect(referencesResponse.statusCode).toBe(200);
+      expect(referencesResponse.json()).toEqual({
+        references: [
+          expect.objectContaining({
+            id: postIds[0],
+            slug: "active-reference",
+            deletedAt: null,
+            titles: { zh: "正常文章" }
+          }),
+          expect.objectContaining({
+            id: postIds[1],
+            slug: "trashed-reference",
+            deletedAt: expect.any(String),
+            titles: { zh: "回收站文章" }
+          })
+        ],
+        activePostCount: 1,
+        trashedPostCount: 1,
+        totalPostCount: 2
+      });
+
+      const detachResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/categories/${category.id}/detach`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { postIds: [postIds[1]] }
+      });
+      expect(detachResponse.statusCode).toBe(200);
+      expect(detachResponse.json()).toEqual({
+        detachedCount: 1,
+        activePostCount: 1,
+        trashedPostCount: 0,
+        totalPostCount: 1
+      });
+
+      const repeatedResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/categories/${category.id}/detach`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { postIds: [postIds[1]] }
+      });
+      expect(repeatedResponse.statusCode).toBe(200);
+      expect(repeatedResponse.json().detachedCount).toBe(0);
     } finally {
       await app.close();
     }

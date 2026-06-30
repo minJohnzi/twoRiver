@@ -1,13 +1,18 @@
-import { CreateTagInputSchema, UpdateTagInputSchema } from "@tworiver/shared";
+import { CreateTagInputSchema, DetachTaxonomyInputSchema, UpdateTagInputSchema } from "@tworiver/shared";
 import type { FastifyInstance } from "fastify";
 import {
   createTag,
   deleteTag,
+  getTagById,
   listTags,
   TagConflictError,
   TagReferencedError,
   updateTag
 } from "../repositories/tagsRepository.js";
+import {
+  detachTagReferences,
+  listTagReferences
+} from "../repositories/taxonomyReferencesRepository.js";
 import { parseId } from "./parseId.js";
 
 interface IdParams {
@@ -21,6 +26,45 @@ export async function adminTagRoutes(app: FastifyInstance) {
   app.get("/api/admin/tags", async () => ({
     tags: listTags(app.db)
   }));
+
+  app.get<{ Params: IdParams }>("/api/admin/tags/:id/references", async (request, reply) => {
+    const id = parseId(request.params.id);
+    const tag = id ? getTagById(app.db, id) : undefined;
+    if (!tag) {
+      reply.code(404).send({ message: "Tag not found" });
+      return;
+    }
+
+    return {
+      references: listTagReferences(app.db, tag.id),
+      activePostCount: tag.activePostCount,
+      trashedPostCount: tag.trashedPostCount,
+      totalPostCount: tag.totalPostCount
+    };
+  });
+
+  app.post<{ Params: IdParams }>("/api/admin/tags/:id/detach", async (request, reply) => {
+    const id = parseId(request.params.id);
+    const parsed = DetachTaxonomyInputSchema.safeParse(request.body);
+    const tag = id ? getTagById(app.db, id) : undefined;
+    if (!tag) {
+      reply.code(404).send({ message: "Tag not found" });
+      return;
+    }
+    if (!parsed.success) {
+      reply.code(400).send({ message: "Invalid taxonomy detach input" });
+      return;
+    }
+
+    const detachedCount = detachTagReferences(app.db, tag.id, parsed.data.postIds);
+    const updated = getTagById(app.db, tag.id)!;
+    return {
+      detachedCount,
+      activePostCount: updated.activePostCount,
+      trashedPostCount: updated.trashedPostCount,
+      totalPostCount: updated.totalPostCount
+    };
+  });
 
   app.post("/api/admin/tags", async (request, reply) => {
     const parsed = CreateTagInputSchema.safeParse(request.body);

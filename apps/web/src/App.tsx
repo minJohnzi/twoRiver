@@ -52,6 +52,8 @@ const loadAboutPage = createRouteModuleLoader(() => import("./pages/AboutPage"))
 const loadLoginPage = createRouteModuleLoader(() => import("./pages/LoginPage"));
 const loadNotFoundPage = createRouteModuleLoader(() => import("./pages/NotFoundPage"));
 const loadAdminAboutPage = createRouteModuleLoader(() => import("./pages/AdminAboutPage"));
+const loadAdminDashboardPage = createRouteModuleLoader(() => import("./pages/AdminDashboardPage"));
+const loadAdminDraftsPage = createRouteModuleLoader(() => import("./pages/AdminDraftsPage"));
 const loadAdminEditorPage = createRouteModuleLoader(() => import("./pages/AdminEditorPage"));
 const loadAdminPostsPage = createRouteModuleLoader(() => import("./pages/AdminPostsPage"));
 const loadAdminResourcesPage = createRouteModuleLoader(() => import("./pages/AdminResourcesPage"));
@@ -64,9 +66,14 @@ const CategoryDetailPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "Cat
 const TagListPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "TagListPage");
 const TagDetailPage = lazyNamed<{ locale: Locale }>(loadTaxonomyPages, "TagDetailPage");
 const AboutPage = lazyNamed<{ locale: Locale }>(loadAboutPage, "AboutPage");
-const LoginPage = lazyNamed<{ locale: Locale }>(loadLoginPage, "LoginPage");
+const LoginPage = lazyNamed<{ locale: Locale; onLoginSuccess?: (user: CurrentUser) => void }>(
+  loadLoginPage,
+  "LoginPage"
+);
 const NotFoundPage = lazyNamed<{ locale: Locale }>(loadNotFoundPage, "NotFoundPage");
 const AdminAboutPage = lazyNamed<{ locale: Locale }>(loadAdminAboutPage, "AdminAboutPage");
+const AdminDashboardPage = lazyNamed<{ locale: Locale }>(loadAdminDashboardPage, "AdminDashboardPage");
+const AdminDraftsPage = lazyNamed<{ locale: Locale }>(loadAdminDraftsPage, "AdminDraftsPage");
 const AdminEditorPage = lazyNamed<{ locale: Locale }>(loadAdminEditorPage, "AdminEditorPage");
 const AdminPostsPage = lazyNamed<{ locale: Locale }>(loadAdminPostsPage, "AdminPostsPage");
 const AdminResourcesPage = lazyNamed<{ locale: Locale }>(loadAdminResourcesPage, "AdminResourcesPage");
@@ -189,6 +196,8 @@ export function App() {
     return scheduleIdleTask(() => {
       void Promise.all([
         loadLoginPage(),
+        loadAdminDashboardPage(),
+        loadAdminDraftsPage(),
         loadAdminPostsPage(),
         loadAdminResourcesPage(),
         loadAdminTaxonomyPage(),
@@ -248,6 +257,11 @@ export function App() {
     navigate("/admin/login", { replace: true });
   }
 
+  function handleAdminLoginSuccess(user: CurrentUser) {
+    setAdminUser(user);
+    setAdminAuthStatus("allowed");
+  }
+
   function handleRouteIntent(pathname: string) {
     if (pathname === "/") {
       void loadHomePage();
@@ -279,8 +293,23 @@ export function App() {
       return;
     }
 
-    if (pathname === "/admin/posts" || pathname.startsWith("/admin/posts/")) {
-      void (pathname === "/admin/posts" ? loadAdminPostsPage() : loadAdminEditorPage());
+    if (pathname === "/admin" || pathname === "/admin/dashboard") {
+      void loadAdminDashboardPage();
+      return;
+    }
+
+    if (pathname === "/admin/posts") {
+      void loadAdminPostsPage();
+      return;
+    }
+
+    if (pathname === "/admin/posts/drafts") {
+      void loadAdminDraftsPage();
+      return;
+    }
+
+    if (pathname.startsWith("/admin/posts/")) {
+      void loadAdminEditorPage();
       return;
     }
 
@@ -329,10 +358,16 @@ export function App() {
             <Route path="/tags" element={<TagListPage locale={publicLocale} />} />
             <Route path="/tags/:slug" element={<TagDetailPage locale={publicLocale} />} />
             <Route path="/about" element={<AboutPage locale={publicLocale} />} />
-            <Route path="/admin/login" element={<LoginPage locale={adminLocale} />} />
+            <Route
+              path="/admin/login"
+              element={<LoginPage locale={adminLocale} onLoginSuccess={handleAdminLoginSuccess} />}
+            />
+            <Route path="/admin" element={requireAdmin(<AdminDashboardPage locale={adminLocale} />)} />
+            <Route path="/admin/dashboard" element={requireAdmin(<AdminDashboardPage locale={adminLocale} />)} />
             <Route path="/admin/about" element={requireAdmin(<AdminAboutPage locale={adminLocale} />)} />
             <Route path="/admin/posts" element={requireAdmin(<AdminPostsPage locale={adminLocale} />)} />
             <Route path="/admin/posts/new" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
+            <Route path="/admin/posts/drafts" element={requireAdmin(<AdminDraftsPage locale={adminLocale} />)} />
             <Route path="/admin/posts/:id" element={requireAdmin(<AdminEditorPage locale={adminLocale} />)} />
             <Route path="/admin/resources" element={requireAdmin(<AdminResourcesPage locale={adminLocale} />)} />
             <Route path="/admin/categories" element={requireAdmin(<AdminTaxonomyPage kind="categories" locale={adminLocale} />)} />

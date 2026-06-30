@@ -1,4 +1,4 @@
-import type { Category, Locale, PostStatus, PostTranslation, UpsertPostInput } from "@tworiver/shared";
+import type { Category, Locale, PostStatus, PostTranslation, Tag, UpsertPostInput } from "@tworiver/shared";
 import {
   type ClipboardEvent,
   type DragEvent,
@@ -12,9 +12,11 @@ import {
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  createAdminTag,
   createAdminPost,
   deleteAdminPost,
   fetchAdminCategories,
+  fetchAdminTags,
   fetchAdminPosts,
   fetchAdminPost,
   translateAdminPostDraft,
@@ -22,6 +24,7 @@ import {
   uploadAdminPostImage
 } from "../api/admin";
 import { MarkdownPreview } from "../components/MarkdownPreview";
+import { getTaxonomyDisplayName, getTaxonomySearchText } from "../utils/taxonomy";
 
 interface AdminEditorPageProps {
   locale: Locale;
@@ -68,7 +71,7 @@ function buildInput(
   status: PostStatus,
   publishedAt: string | null,
   categorySlug: string,
-  tagText: string,
+  tagSlugs: string[],
   translations: TranslationDraft
 ): UpsertPostInput {
   const nextTranslations = (["zh", "en"] as const)
@@ -87,10 +90,7 @@ function buildInput(
     status,
     publishedAt: status === "draft" ? null : publishedAt ?? new Date().toISOString(),
     categorySlug: categorySlug.trim() || null,
-    tagSlugs: tagText
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean),
+    tagSlugs: Array.from(new Set(tagSlugs.map((tagSlug) => tagSlug.trim()).filter(Boolean))),
     translations:
       nextTranslations.length > 0
         ? nextTranslations
@@ -104,6 +104,21 @@ function normalizeSlug(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function sortTags(tags: Tag[]): Tag[] {
+  return [...tags].sort((first, second) => first.name.localeCompare(second.name) || first.slug.localeCompare(second.slug));
+}
+
+function mergeTags(currentTags: Tag[], incomingTags: Tag[]): Tag[] {
+  const tagBySlug = new Map<string, Tag>();
+  for (const tag of currentTags) {
+    tagBySlug.set(tag.slug, tag);
+  }
+  for (const tag of incomingTags) {
+    tagBySlug.set(tag.slug, tag);
+  }
+  return sortTags(Array.from(tagBySlug.values()));
 }
 
 function otherLocale(source: Locale): Locale {
@@ -189,10 +204,6 @@ function hasTranslationContent(translation: TranslationDraft[Locale]): boolean {
   return Boolean(translation.title.trim() || translation.summary.trim() || translation.contentMarkdown.trim());
 }
 
-function canNormalizeSlug(value: string): boolean {
-  return /[a-z0-9]/i.test(value);
-}
-
 function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | null {
   if (!POST_SLUG_PATTERN.test(input.slug)) {
     return uiLocale === "zh"
@@ -207,11 +218,11 @@ function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | n
       : "Every language version with content needs a title.";
   }
 
-  const invalidTag = input.tagSlugs.find((tagSlug) => !canNormalizeSlug(tagSlug));
+  const invalidTag = input.tagSlugs.find((tagSlug) => !POST_SLUG_PATTERN.test(tagSlug));
   if (invalidTag) {
     return uiLocale === "zh"
-      ? `标签“${invalidTag}”至少需要包含英文字母或数字。`
-      : `Tag "${invalidTag}" needs at least one letter or number.`;
+      ? `标签 slug“${invalidTag}”只能使用小写英文字母、数字和连字符。`
+      : `Tag slug "${invalidTag}" can use only lowercase letters, numbers, and hyphens.`;
   }
 
   return null;
@@ -377,13 +388,21 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
   const [postUid, setPostUid] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [slug, setSlug] = useState("");
   const [status, setStatus] = useState<PostStatus>("draft");
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
   const [categorySlug, setCategorySlug] = useState("");
-  const [tagText, setTagText] = useState("");
+  const [selectedTagSlugs, setSelectedTagSlugs] = useState<string[]>([]);
+  const [tagSearch, setTagSearch] = useState("");
+  const [quickTagName, setQuickTagName] = useState("");
+  const [quickTagSlug, setQuickTagSlug] = useState("");
+  const [quickTagSlugTouched, setQuickTagSlugTouched] = useState(false);
+  const [isCreatingTag, setIsCreatingTag] = useState(false);
+  const [tagSelectorError, setTagSelectorError] = useState<string | null>(null);
   const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
   const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("split");
+  const [isFocusMode, setIsFocusMode] = useState(false);
   const [markdownSearch, setMarkdownSearch] = useState<MarkdownSearchState>(EMPTY_SEARCH_STATE);
   const [isLoading, setIsLoading] = useState(Boolean(postId));
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -400,18 +419,31 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
-    fetchAdminCategories({ signal: controller.signal })
-      .then(({ categories: nextCategories }) => {
+
+    async function loadTaxonomyOptions() {
+      const [categoryResponse, tagResponse] = await Promise.all([
+        fetchAdminCategories({ signal: controller.signal }),
+        fetchAdminTags({ signal: controller.signal })
+      ]);
+
+      if (isMounted) {
+        setCategories(categoryResponse.categories);
+        setTags(sortTags(tagResponse.tags));
+      }
+    }
+
+    void loadTaxonomyOptions()
+      .catch(() => {
         if (isMounted) {
-          setCategories(nextCategories);
+          setTagSelectorError(locale === "zh" ? "标签列表加载失败，可刷新后重试。" : "Failed to load tags. Refresh and try again.");
         }
-      })
-      .catch(() => undefined);
+      });
+
     return () => {
       isMounted = false;
       controller.abort();
     };
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     if (!postId) {
@@ -447,7 +479,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         setStatus(post.status);
         setPublishedAt(post.publishedAt);
         setCategorySlug(post.category?.slug ?? "");
-        setTagText(post.tags.map((tag) => tag.slug).join(", "));
+        setSelectedTagSlugs(post.tags.map((tag) => tag.slug));
+        setTags((currentTags) => mergeTags(currentTags, post.tags));
         setTranslations(nextTranslations);
       } catch (caught) {
         if (isMounted && !controller.signal.aborted) {
@@ -476,6 +509,81 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         [field]: value
       }
     }));
+  }
+
+  function addSelectedTagSlug(tagSlug: string) {
+    setSelectedTagSlugs((current) => (current.includes(tagSlug) ? current : [...current, tagSlug]));
+    setTagSelectorError(null);
+  }
+
+  function removeSelectedTagSlug(tagSlug: string) {
+    setSelectedTagSlugs((current) => current.filter((selectedTagSlug) => selectedTagSlug !== tagSlug));
+    setTagSelectorError(null);
+  }
+
+  function updateQuickTagName(value: string) {
+    setQuickTagName(value);
+    if (!quickTagSlugTouched) {
+      setQuickTagSlug(normalizeSlug(value));
+    }
+    setTagSelectorError(null);
+  }
+
+  function updateQuickTagSlug(value: string) {
+    setQuickTagSlug(normalizeSlug(value));
+    setQuickTagSlugTouched(true);
+    setTagSelectorError(null);
+  }
+
+  function resetQuickTagDraft() {
+    setQuickTagName("");
+    setQuickTagSlug("");
+    setQuickTagSlugTouched(false);
+  }
+
+  async function createAndSelectTag() {
+    const name = quickTagName.trim();
+    const tagSlug = normalizeSlug(quickTagSlug || quickTagName);
+
+    if (!name) {
+      setTagSelectorError(locale === "zh" ? "请先填写标签名称。" : "Add a tag name first.");
+      return;
+    }
+
+    if (!POST_SLUG_PATTERN.test(tagSlug)) {
+      setTagSelectorError(
+        locale === "zh"
+          ? "标签 slug 只能使用小写英文字母、数字和连字符。"
+          : "Tag slug can use only lowercase letters, numbers, and hyphens."
+      );
+      return;
+    }
+
+    const existingTag = tags.find((tag) => tag.slug === tagSlug);
+    if (existingTag) {
+      addSelectedTagSlug(existingTag.slug);
+      resetQuickTagDraft();
+      setTagSearch("");
+      return;
+    }
+
+    setIsCreatingTag(true);
+    setTagSelectorError(null);
+    try {
+      const { tag } = await createAdminTag({
+        name,
+        slug: tagSlug,
+        translations: [{ locale, name }]
+      });
+      setTags((currentTags) => mergeTags(currentTags, [tag]));
+      addSelectedTagSlug(tag.slug);
+      resetQuickTagDraft();
+      setTagSearch("");
+    } catch (caught) {
+      setTagSelectorError(caught instanceof Error ? caught.message : "Failed to create tag");
+    } finally {
+      setIsCreatingTag(false);
+    }
   }
 
   function getSelectedMarkdownDetails() {
@@ -705,7 +813,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     });
 
     try {
-      const input = buildInput(slug, nextStatus, publishedAt, categorySlug, tagText, translations);
+      const input = buildInput(slug, nextStatus, publishedAt, categorySlug, selectedTagSlugs, translations);
       const { posts } = await fetchAdminPosts();
       const resolved = resolvePostSlug(input, translations, activeLocale, posts, postId, locale);
       const validationMessage = resolved.error ?? validatePostInput(resolved.input, locale);
@@ -831,6 +939,20 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const currentTranslation = translations[activeLocale];
   const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
+  const editorStats = useMemo(() => {
+    const body = currentTranslation.contentMarkdown.trim();
+    const words = body ? body.split(/\s+/).filter(Boolean).length : 0;
+    const cjkCharacters = (body.match(/[\u4e00-\u9fff]/g) ?? []).length;
+    const readableUnits = Math.max(words, cjkCharacters);
+    const paragraphs = body ? body.split(/\n{2,}/).filter((paragraph) => paragraph.trim()).length : 0;
+    const readingMinutes = Math.max(1, Math.ceil(readableUnits / (activeLocale === "zh" ? 450 : 220)));
+
+    return {
+      characters: currentTranslation.contentMarkdown.length,
+      paragraphs,
+      readingMinutes
+    };
+  }, [activeLocale, currentTranslation.contentMarkdown]);
   const markdownSearchMatches = useMemo(
     () => findSearchMatches(currentTranslation.contentMarkdown, markdownSearch.query),
     [currentTranslation.contentMarkdown, markdownSearch.query]
@@ -839,6 +961,24 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const targetLocale = otherLocale(activeLocale);
   const isBusy = Boolean(saveAction) || isDeleting || isTranslating;
   const canPreview = Boolean(postId && slug.trim() && status !== "draft");
+  const selectedTags = useMemo(
+    () =>
+      selectedTagSlugs.map((selectedTagSlug) => tags.find((tag) => tag.slug === selectedTagSlug) ?? { id: 0, slug: selectedTagSlug, name: selectedTagSlug }),
+    [selectedTagSlugs, tags]
+  );
+  const filteredTags = useMemo(() => {
+    const query = tagSearch.trim().toLocaleLowerCase();
+    const sortedTags = [...tags].sort(
+      (first, second) =>
+        getTaxonomyDisplayName(first, locale).localeCompare(getTaxonomyDisplayName(second, locale)) ||
+        first.slug.localeCompare(second.slug)
+    );
+    if (!query) {
+      return sortedTags;
+    }
+
+    return sortedTags.filter((tag) => getTaxonomySearchText(tag, locale).toLocaleLowerCase().includes(query));
+  }, [locale, tagSearch, tags]);
 
   if (isLoading) {
     return (
@@ -849,7 +989,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   return (
-    <section className="admin-editor">
+    <section className={`admin-editor${isFocusMode ? " is-focus-mode" : ""}`}>
       <form className="editor-shell" onSubmit={handleSubmit}>
         <div className="editor-toolbar">
           <div>
@@ -943,20 +1083,122 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                   <option value="">{locale === "zh" ? "不设置分类" : "No category"}</option>
                   {categories.map((category) => (
                     <option key={category.slug} value={category.slug}>
-                      {category.name}
+                      {getTaxonomyDisplayName(category, locale)}
                     </option>
                   ))}
                 </select>
               </label>
-              <label>
-                <span>{locale === "zh" ? "标签（逗号分隔）" : "Tags (comma-separated)"}</span>
-                <input value={tagText} onChange={(event) => setTagText(event.target.value)} placeholder="typescript, sqlite" />
-              </label>
+              <div className="editor-tag-selector" aria-label={locale === "zh" ? "标签选择器" : "Tag selector"}>
+                <div className="editor-tag-selector__heading">
+                  <span>{locale === "zh" ? "标签" : "Tags"}</span>
+                  <small>
+                    {locale === "zh"
+                      ? "搜索已有标签，多选后保存；新标签需要先创建。"
+                      : "Search existing tags, select multiple, and create new tags deliberately."}
+                  </small>
+                </div>
+
+                <div className="editor-selected-tags" aria-label={locale === "zh" ? "已选标签" : "Selected tags"}>
+                  {selectedTags.length > 0 ? (
+                    selectedTags.map((tag) => {
+                      const displayName = getTaxonomyDisplayName(tag, locale);
+
+                      return (
+                        <button
+                          className="editor-tag-chip"
+                          type="button"
+                          key={tag.slug}
+                          aria-label={locale === "zh" ? `移除 ${displayName}` : `Remove ${displayName}`}
+                          onClick={() => removeSelectedTagSlug(tag.slug)}
+                        >
+                          <span>{displayName}</span>
+                          <code>/{tag.slug}</code>
+                          <i aria-hidden="true">×</i>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="editor-selected-tags__empty">{locale === "zh" ? "尚未选择标签" : "No tags selected"}</span>
+                  )}
+                </div>
+
+                <label>
+                  <span>{locale === "zh" ? "搜索标签" : "Search tags"}</span>
+                  <input
+                    type="search"
+                    value={tagSearch}
+                    onChange={(event) => setTagSearch(event.target.value)}
+                    placeholder={locale === "zh" ? "输入名称或 slug" : "Search by name or slug"}
+                  />
+                </label>
+
+                <div className="editor-tag-options" aria-label={locale === "zh" ? "可选标签" : "Available tags"}>
+                  {filteredTags.length > 0 ? (
+                    filteredTags.map((tag) => {
+                      const isSelected = selectedTagSlugs.includes(tag.slug);
+                      const displayName = getTaxonomyDisplayName(tag, locale);
+
+                      return (
+                        <button
+                          className={isSelected ? "editor-tag-option is-selected" : "editor-tag-option"}
+                          type="button"
+                          key={tag.slug}
+                          aria-pressed={isSelected}
+                          aria-label={locale === "zh" ? `${isSelected ? "已选" : "选择"} ${displayName}` : `${isSelected ? "Selected" : "Select"} ${displayName}`}
+                          onClick={() => (isSelected ? removeSelectedTagSlug(tag.slug) : addSelectedTagSlug(tag.slug))}
+                        >
+                          <span>{displayName}</span>
+                          <code>/{tag.slug}</code>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="field-hint">{locale === "zh" ? "没有匹配标签，可在下方创建。" : "No matching tags. Create one below."}</p>
+                  )}
+                </div>
+
+                <div className="editor-tag-create" aria-label={locale === "zh" ? "快速创建标签" : "Quick create tag"}>
+                  <label>
+                    <span>{locale === "zh" ? "新标签名称" : "New tag name"}</span>
+                    <input
+                      value={quickTagName}
+                      onChange={(event) => updateQuickTagName(event.target.value)}
+                      placeholder={locale === "zh" ? "边缘运行时" : "Edge Runtime"}
+                    />
+                  </label>
+                  <label>
+                    <span>{locale === "zh" ? "新标签 slug" : "New tag slug"}</span>
+                    <input
+                      value={quickTagSlug}
+                      onChange={(event) => updateQuickTagSlug(event.target.value)}
+                      placeholder="edge-runtime"
+                    />
+                  </label>
+                  <button className="secondary-button" type="button" disabled={isCreatingTag} onClick={() => void createAndSelectTag()}>
+                    {isCreatingTag
+                      ? locale === "zh"
+                        ? "创建中..."
+                        : "Creating..."
+                      : locale === "zh"
+                        ? "创建并选中标签"
+                        : "Create and select tag"}
+                  </button>
+                </div>
+
+                {tagSelectorError ? (
+                  <p className="error-text" role="alert">
+                    {tagSelectorError}
+                  </p>
+                ) : null}
+              </div>
             </div>
 
             <div className="editor-card editor-card--writing">
               <div className="editor-card__heading editor-card__heading--stacked">
-                <h2>{locale === "zh" ? "正文内容" : "Writing"}</h2>
+                <div>
+                  <p className="editor-terminal-kicker">{isFocusMode ? "Zen Mode: Writing Space" : "Markdown Writing Terminal"}</p>
+                  <h2>{locale === "zh" ? "正文内容" : "Writing"}</h2>
+                </div>
                 <div className="editor-writing-tools">
                   <div className="language-tabs" role="tablist" aria-label="Editor language">
                     {(["zh", "en"] as const).map((translationLocale) => (
@@ -979,7 +1221,17 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                         ? `翻译为${languageLabel(targetLocale, locale)}`
                         : `Translate to ${languageLabel(targetLocale, locale)}`}
                   </button>
+                  <button className="secondary-button editor-focus-toggle" type="button" onClick={() => setIsFocusMode((current) => !current)}>
+                    {isFocusMode ? (locale === "zh" ? "退出沉浸" : "Exit focus") : locale === "zh" ? "沉浸写作" : "Focus"}
+                  </button>
                 </div>
+              </div>
+
+              <div className="editor-writing-stats" aria-label={locale === "zh" ? "正文统计" : "Writing stats"}>
+                <span><strong>{editorStats.characters}</strong>{locale === "zh" ? "字符" : "chars"}</span>
+                <span><strong>{editorStats.paragraphs}</strong>{locale === "zh" ? "段落" : "paragraphs"}</span>
+                <span><strong>{markdownHeadings.length}</strong>{locale === "zh" ? "标题" : "headings"}</span>
+                <span><strong>{editorStats.readingMinutes}</strong>{locale === "zh" ? "分钟阅读" : "min read"}</span>
               </div>
 
               {isTranslating ? (

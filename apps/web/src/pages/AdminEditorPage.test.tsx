@@ -4,9 +4,11 @@ import type { PublicPost } from "@tworiver/shared";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createAdminTag,
   createAdminPost,
   deleteAdminPost,
   fetchAdminCategories,
+  fetchAdminTags,
   fetchAdminPosts,
   fetchAdminPost,
   translateAdminPostDraft,
@@ -17,9 +19,11 @@ import { MarkdownPreview } from "../components/MarkdownPreview";
 import { AdminEditorPage } from "./AdminEditorPage";
 
 vi.mock("../api/admin", () => ({
+  createAdminTag: vi.fn(),
   createAdminPost: vi.fn(),
   deleteAdminPost: vi.fn(),
   fetchAdminCategories: vi.fn(),
+  fetchAdminTags: vi.fn(),
   fetchAdminPosts: vi.fn(),
   fetchAdminPost: vi.fn(),
   translateAdminPostDraft: vi.fn(),
@@ -27,9 +31,11 @@ vi.mock("../api/admin", () => ({
   uploadAdminPostImage: vi.fn()
 }));
 
+const mockedCreateAdminTag = vi.mocked(createAdminTag);
 const mockedCreateAdminPost = vi.mocked(createAdminPost);
 const mockedDeleteAdminPost = vi.mocked(deleteAdminPost);
 const mockedFetchAdminCategories = vi.mocked(fetchAdminCategories);
+const mockedFetchAdminTags = vi.mocked(fetchAdminTags);
 const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
 const mockedFetchAdminPost = vi.mocked(fetchAdminPost);
 const mockedTranslateAdminPostDraft = vi.mocked(translateAdminPostDraft);
@@ -142,7 +148,7 @@ describe("MarkdownPreview", () => {
   it("resolves uploaded image URLs through the API base URL", () => {
     const { container } = render(<MarkdownPreview markdown="![图片](/uploads/images/posts/p_111/photo.png)" />);
 
-    expect(container.querySelector("img")).toHaveAttribute("src", "http://localhost:4000/uploads/images/posts/p_111/photo.png");
+    expect(container.querySelector("img")).toHaveAttribute("src", "/uploads/images/posts/p_111/photo.png");
   });
 
   it("opens markdown images in a dismissible preview", () => {
@@ -152,7 +158,7 @@ describe("MarkdownPreview", () => {
     expect(imageButton).toHaveClass("markdown-image-button");
     expect(within(imageButton).getByRole("img", { name: "Diagram" })).toHaveAttribute(
       "src",
-      "http://localhost:4000/uploads/images/posts/p_111/diagram.png"
+      "/uploads/images/posts/p_111/diagram.png"
     );
 
     fireEvent.click(imageButton);
@@ -160,7 +166,7 @@ describe("MarkdownPreview", () => {
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(within(dialog).getByRole("img", { name: "Diagram" })).toHaveAttribute(
       "src",
-      "http://localhost:4000/uploads/images/posts/p_111/diagram.png"
+      "/uploads/images/posts/p_111/diagram.png"
     );
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Close image preview" }));
@@ -185,8 +191,15 @@ describe("admin editor image uploads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedFetchAdminCategories.mockResolvedValue({ categories: [] });
+    mockedFetchAdminTags.mockResolvedValue({
+      tags: [
+        { id: 1, slug: "typescript", name: "TypeScript" },
+        { id: 2, slug: "sqlite", name: "SQLite" }
+      ]
+    });
     mockedFetchAdminPosts.mockResolvedValue({ posts: [] });
     mockedFetchAdminPost.mockResolvedValue({ post: makePost() });
+    mockedCreateAdminTag.mockResolvedValue({ tag: { id: 3, slug: "edge-runtime", name: "Edge Runtime" } });
     mockedCreateAdminPost.mockResolvedValue({ post: makePost() });
     mockedUpdateAdminPost.mockResolvedValue({ post: makePost() });
     mockedDeleteAdminPost.mockResolvedValue({ ok: true });
@@ -561,17 +574,37 @@ describe("admin editor image uploads", () => {
     expect(mockedCreateAdminPost).not.toHaveBeenCalled();
   });
 
-  it("blocks tag values that cannot become slugs", async () => {
+  it("selects existing tags with search and creates a controlled new tag before saving", async () => {
     renderEditor("/admin/posts/new");
 
     fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "valid-post" } });
-    fireEvent.change(screen.getByLabelText("Tags (comma-separated)"), { target: { value: "!!!" } });
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search tags" }), { target: { value: "type" } });
+    fireEvent.click(screen.getByRole("button", { name: "Select TypeScript" }));
+    fireEvent.change(screen.getByLabelText("New tag name"), { target: { value: "Edge Runtime" } });
+    fireEvent.change(screen.getByLabelText("New tag slug"), { target: { value: "edge-runtime" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and select tag" }));
+
+    await waitFor(() =>
+      expect(mockedCreateAdminTag).toHaveBeenCalledWith({
+        name: "Edge Runtime",
+        slug: "edge-runtime",
+        translations: [{ locale: "en", name: "Edge Runtime" }]
+      })
+    );
+    expect(screen.getByRole("button", { name: "Remove TypeScript" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Edge Runtime" })).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Short title" } });
     fireEvent.change(await loadedMarkdownTextarea(), { target: { value: "Short body" } });
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent('Tag "!!!" needs at least one letter or number');
-    expect(mockedCreateAdminPost).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mockedCreateAdminPost).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tagSlugs: ["typescript", "edge-runtime"]
+        })
+      )
+    );
   });
 
   it("hides a published post while preserving the original published time", async () => {

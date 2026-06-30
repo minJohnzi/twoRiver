@@ -1,25 +1,27 @@
-import type { Tag } from "@tworiver/shared";
+import type { Locale, Tag } from "@tworiver/shared";
+import { getTaxonomyDisplayName } from "../utils/taxonomy";
 
 interface TagFilterProps {
   tags: Tag[];
+  locale: Locale;
   selectedTag: string | null;
   onSelectTag: (tagSlug: string | null) => void;
 }
 
-export function TagFilter({ tags, selectedTag, onSelectTag }: TagFilterProps) {
+export function TagFilter({ tags, locale, selectedTag, onSelectTag }: TagFilterProps) {
   if (tags.length === 0) {
     return null;
   }
 
   return (
-    <div className="tag-filter" aria-label="Filter by tag">
+    <div className="tag-filter" aria-label={locale === "zh" ? "按标签筛选" : "Filter by tag"}>
       <button
         type="button"
         className={selectedTag === null ? "is-active" : undefined}
         aria-pressed={selectedTag === null}
         onClick={() => onSelectTag(null)}
       >
-        All
+        {locale === "zh" ? "全部" : "All"}
       </button>
       {tags.map((tag) => (
         <button
@@ -29,7 +31,7 @@ export function TagFilter({ tags, selectedTag, onSelectTag }: TagFilterProps) {
           aria-pressed={selectedTag === tag.slug}
           onClick={() => onSelectTag(tag.slug)}
         >
-          {tag.name}
+          {getTaxonomyDisplayName(tag, locale)}
         </button>
       ))}
     </div>

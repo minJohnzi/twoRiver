@@ -119,4 +119,68 @@ describe("admin parity shared schemas", () => {
       })
     ).toThrow();
   });
+
+  test("accepts explicit active, trashed, and total taxonomy usage counts", () => {
+    const category = shared.CategorySchema.parse({
+      id: 1,
+      slug: "engineering",
+      name: "Engineering",
+      postCount: 2,
+      activePostCount: 2,
+      trashedPostCount: 1,
+      totalPostCount: 3
+    });
+    const tag = shared.TagSchema.parse({
+      id: 2,
+      slug: "typescript",
+      name: "TypeScript",
+      postCount: 4,
+      activePostCount: 4,
+      trashedPostCount: 2,
+      totalPostCount: 6
+    });
+
+    expect(category.totalPostCount).toBe(3);
+    expect(tag.trashedPostCount).toBe(2);
+    expect(() =>
+      shared.CategorySchema.parse({
+        id: 1,
+        slug: "engineering",
+        name: "Engineering",
+        activePostCount: -1
+      })
+    ).toThrow();
+  });
+
+  test("validates taxonomy reference summaries", () => {
+    const referenceSchema = schema("TaxonomyReferenceSchema");
+
+    expect(
+      referenceSchema.parse({
+        id: 7,
+        slug: "recoverable-post",
+        status: "draft",
+        deletedAt: "2026-06-29T08:00:00.000Z",
+        titles: { zh: "可恢复文章", en: "Recoverable post" }
+      })
+    ).toBeTruthy();
+    expect(() =>
+      referenceSchema.parse({
+        id: 7,
+        slug: "recoverable-post",
+        status: "draft",
+        deletedAt: null,
+        titles: {}
+      })
+    ).toThrow();
+  });
+
+  test("validates bounded and unique taxonomy detach post ids", () => {
+    const detachSchema = schema("DetachTaxonomyInputSchema");
+
+    expect(detachSchema.parse({ postIds: [1, 2, 3] })).toEqual({ postIds: [1, 2, 3] });
+    expect(() => detachSchema.parse({ postIds: [] })).toThrow();
+    expect(() => detachSchema.parse({ postIds: [1, 1] })).toThrow();
+    expect(() => detachSchema.parse({ postIds: Array.from({ length: 101 }, (_, index) => index + 1) })).toThrow();
+  });
 });

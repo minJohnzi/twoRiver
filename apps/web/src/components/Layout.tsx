@@ -1,6 +1,7 @@
 import type { Locale } from "@tworiver/shared";
 import { lazy, Suspense, type ReactNode } from "react";
 import { matchPath, NavLink, useLocation } from "react-router-dom";
+import { ArticleNav } from "./ArticleNav";
 import { LanguageToggle } from "./LanguageToggle";
 import { TwoRiverMark } from "./TwoRiverMark";
 
@@ -44,7 +45,9 @@ export function Layout({
 }: LayoutProps) {
   const { pathname } = useLocation();
   const isAdminRoute = pathname.startsWith("/admin");
+  const isAdminLoginRoute = pathname === "/admin/login";
   const isAdminWorkspace = isAdminRoute && pathname !== "/admin/login";
+  const isArticleRoute = Boolean(matchPath({ path: "/posts/:slug", end: true }, pathname));
   const isPublicNotFoundRoute = !isAdminRoute && !isKnownPublicPath(pathname);
   const nextTheme = theme === "dark" ? "light" : "dark";
   const routeIntentProps = (nextPathname: string) => ({
@@ -74,8 +77,27 @@ export function Layout({
 
   return (
     <div className="app-shell" data-theme={theme}>
-      <main className={isAdminRoute ? "site-main site-main--wide" : "site-main"}>
-        {!isPublicNotFoundRoute ? (
+      <main
+        className={
+          isAdminLoginRoute
+            ? "site-main site-main--admin-login"
+            : isAdminRoute
+              ? "site-main site-main--wide"
+              : isArticleRoute
+                ? "site-main site-main--article"
+              : "site-main"
+        }
+      >
+        {!isPublicNotFoundRoute && !isAdminLoginRoute && isArticleRoute ? (
+          <ArticleNav
+            locale={locale}
+            theme={theme}
+            onLocaleChange={onLocaleChange}
+            onThemeChange={onThemeChange}
+            onRouteIntent={onRouteIntent}
+          />
+        ) : null}
+        {!isPublicNotFoundRoute && !isAdminLoginRoute && !isArticleRoute ? (
           <header className="site-header">
             <NavLink to="/" className="site-brand" aria-label="TwoRiver home">
               <TwoRiverMark />

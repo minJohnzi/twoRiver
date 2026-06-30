@@ -11,8 +11,8 @@ import {
 } from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
 import { normalizeSlug } from "../services/slugService.js";
-import { ensureCategory } from "./categoriesRepository.js";
-import { ensureTags } from "./tagsRepository.js";
+import { getCategoryBySlug } from "./categoriesRepository.js";
+import { getTagBySlug } from "./tagsRepository.js";
 
 export interface PostRecord {
   id: number;
@@ -74,6 +74,19 @@ interface CategoryRow {
   name: string;
 }
 
+interface TagTranslationRow {
+  tag_id: number;
+  locale: "zh" | "en";
+  name: string;
+}
+
+interface CategoryTranslationRow {
+  category_id: number;
+  locale: "zh" | "en";
+  name: string;
+  description: string;
+}
+
 export class InvalidPostInputError extends Error {
   constructor() {
     super("Invalid post input");
@@ -95,6 +108,13 @@ export class PostBulkTargetNotFoundError extends Error {
   }
 }
 
+export class TaxonomyNotFoundError extends Error {
+  constructor(kind: "Category" | "Tag", slug: string) {
+    super(`${kind} "${slug}" does not exist`);
+    this.name = "TaxonomyNotFoundError";
+  }
+}
+
 const POST_COLUMNS = `
   id, uid, slug, status, category_id, published_at,
   is_pinned, is_featured, cover_url, deleted_at, created_at, updated_at
@@ -111,20 +131,75 @@ function mapTranslation(row: TranslationRow): PostTranslation {
   };
 }
 
-function mapTag(row: TagRow): Tag {
+function mapTag(row: TagRow, translations: NonNullable<Tag["translations"]> = []): Tag {
   return {
     id: row.id,
     slug: row.slug,
-    name: row.name
+    name: row.name,
+    translations
   };
 }
 
-function mapCategory(row: CategoryRow): Category {
+function mapCategory(row: CategoryRow, translations: NonNullable<Category["translations"]> = []): Category {
   return {
     id: row.id,
     slug: row.slug,
-    name: row.name
+    name: row.name,
+    translations
   };
+}
+
+function loadTagTranslations(db: BlogDatabase, tagIds: number[]): Map<number, NonNullable<Tag["translations"]>> {
+  const uniqueIds = Array.from(new Set(tagIds));
+  if (uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT tag_id, locale, name
+       FROM tag_translations
+       WHERE tag_id IN (${placeholders(uniqueIds)})
+       ORDER BY locale ASC`
+    )
+    .all(...uniqueIds) as TagTranslationRow[];
+  const translations = new Map<number, NonNullable<Tag["translations"]>>();
+  for (const row of rows) {
+    if (!row.name.trim()) {
+      continue;
+    }
+    const existing = translations.get(row.tag_id) ?? [];
+    existing.push({ locale: row.locale, name: row.name });
+    translations.set(row.tag_id, existing);
+  }
+  return translations;
+}
+
+function loadCategoryTranslations(db: BlogDatabase, categoryIds: number[]): Map<number, NonNullable<Category["translations"]>> {
+  const uniqueIds = Array.from(new Set(categoryIds));
+  if (uniqueIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT category_id, locale, name, description
+       FROM category_translations
+       WHERE category_id IN (${placeholders(uniqueIds)})
+       ORDER BY locale ASC`
+    )
+    .all(...uniqueIds) as CategoryTranslationRow[];
+  const translations = new Map<number, NonNullable<Category["translations"]>>();
+  for (const row of rows) {
+    const existing = translations.get(row.category_id) ?? [];
+    existing.push({
+      locale: row.locale,
+      ...(row.name.trim() ? { name: row.name } : {}),
+      description: row.description
+    });
+    translations.set(row.category_id, existing);
+  }
+  return translations;
 }
 
 function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
@@ -153,6 +228,9 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
       : (db.prepare("SELECT id, slug, name FROM categories WHERE id = ?").get(row.category_id) as
           | CategoryRow
           | undefined);
+  const tagTranslations = loadTagTranslations(db, tagRows.map((tag) => tag.id));
+  const categoryTranslations =
+    categoryRow === undefined ? new Map<number, NonNullable<Category["translations"]>>() : loadCategoryTranslations(db, [categoryRow.id]);
 
   return {
     id: row.id,
@@ -166,8 +244,8 @@ function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
     deletedAt: row.deleted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    category: categoryRow ? mapCategory(categoryRow) : null,
-    tags: tagRows.map(mapTag),
+    category: categoryRow ? mapCategory(categoryRow, categoryTranslations.get(categoryRow.id) ?? []) : null,
+    tags: tagRows.map((tag) => mapTag(tag, tagTranslations.get(tag.id) ?? [])),
     translations: translationRows.map(mapTranslation)
   };
 }
@@ -222,7 +300,10 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
       : (db
           .prepare(`SELECT id, slug, name FROM categories WHERE id IN (${placeholders(categoryIds)})`)
           .all(...categoryIds) as CategoryRow[]);
-  const categoriesById = new Map(categoryRows.map((row) => [row.id, mapCategory(row)]));
+  const tagIds = Array.from(new Set(tagRows.map((row) => row.id)));
+  const categoryTranslations = loadCategoryTranslations(db, categoryIds);
+  const tagTranslations = loadTagTranslations(db, tagIds);
+  const categoriesById = new Map(categoryRows.map((row) => [row.id, mapCategory(row, categoryTranslations.get(row.id) ?? [])]));
   const translationsByPostId = groupRowsByPostId(translationRows);
   const tagsByPostId = groupRowsByPostId(tagRows);
 
@@ -239,7 +320,7 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     category: row.category_id === null ? null : (categoriesById.get(row.category_id) ?? null),
-    tags: (tagsByPostId.get(row.id) ?? []).map(mapTag),
+    tags: (tagsByPostId.get(row.id) ?? []).map((tag) => mapTag(tag, tagTranslations.get(tag.id) ?? [])),
     translations: (translationsByPostId.get(row.id) ?? []).map(mapTranslation)
   }));
 }
@@ -277,7 +358,7 @@ function replacePostRelations(db: BlogDatabase, postId: number, input: ParsedUps
     );
   }
 
-  const tags = ensureTags(db, input.tagSlugs);
+  const tags = resolveTags(db, input.tagSlugs);
   const insertPostTag = db.prepare("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)");
   for (const tag of tags) {
     insertPostTag.run(postId, tag.id);
@@ -319,6 +400,31 @@ function postSlugExists(db: BlogDatabase, slug: string, excludedPostId?: number)
   return row !== undefined;
 }
 
+function resolveCategory(db: BlogDatabase, categorySlug: string | null): Category | null {
+  if (categorySlug === null) {
+    return null;
+  }
+  const slug = normalizeSlug(categorySlug);
+  const category = slug ? getCategoryBySlug(db, slug) : undefined;
+  if (!category) {
+    throw new TaxonomyNotFoundError("Category", slug || categorySlug);
+  }
+  return category;
+}
+
+function resolveTags(db: BlogDatabase, tagSlugs: string[]): Tag[] {
+  const normalizedSlugs = Array.from(
+    new Set(tagSlugs.map((tagSlug) => normalizeSlug(tagSlug)).filter((slug): slug is string => Boolean(slug)))
+  );
+  return normalizedSlugs.map((slug) => {
+    const tag = getTagBySlug(db, slug);
+    if (!tag) {
+      throw new TaxonomyNotFoundError("Tag", slug);
+    }
+    return tag;
+  });
+}
+
 export function createPost(db: BlogDatabase, input: unknown): PostRecord {
   const parsed = UpsertPostInputSchema.parse(input);
   validatePostInput(parsed);
@@ -330,7 +436,7 @@ export function createPost(db: BlogDatabase, input: unknown): PostRecord {
 
     const now = new Date().toISOString();
     const uid = `p_${crypto.randomUUID()}`;
-    const category = ensureCategory(db, parsed.categorySlug);
+    const category = resolveCategory(db, parsed.categorySlug);
     const result = db
       .prepare(
         `INSERT INTO posts (
@@ -378,7 +484,7 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
     }
 
     const now = new Date().toISOString();
-    const category = ensureCategory(db, parsed.categorySlug);
+    const category = resolveCategory(db, parsed.categorySlug);
     db.prepare(
       `UPDATE posts
        SET slug = ?, status = ?, category_id = ?, published_at = ?,

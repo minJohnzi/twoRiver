@@ -12,6 +12,7 @@ import {
   permanentlyDeletePost,
   PostBulkTargetNotFoundError,
   PostSlugConflictError,
+  TaxonomyNotFoundError,
   restorePost,
   trashPost,
   updatePostLifecycle,
@@ -51,6 +52,10 @@ const AdminPostLifecycleInputSchema = PostLifecycleInputSchema.refine((input) =>
 });
 
 function sendPostError(error: unknown, reply: FastifyReply): boolean {
+  if (error instanceof TaxonomyNotFoundError) {
+    reply.code(400).send({ message: error.message });
+    return true;
+  }
   if (error instanceof InvalidPostInputError) {
     reply.code(400).send({ message: "Invalid post input" });
     return true;

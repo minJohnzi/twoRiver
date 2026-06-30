@@ -142,6 +142,78 @@ function addColumnIfMissing(
   }
 }
 
+interface TaxonomyNameConflictRow {
+  normalized_name: string;
+  slugs: string;
+}
+
+function findTaxonomyNameConflicts(
+  db: ReturnType<typeof openDatabase>,
+  tableName: "categories" | "tags"
+): TaxonomyNameConflictRow[] {
+  return db
+    .prepare(
+      `SELECT lower(trim(name)) AS normalized_name, group_concat(slug, ', ') AS slugs
+       FROM ${tableName}
+       GROUP BY lower(trim(name))
+       HAVING COUNT(*) > 1
+       ORDER BY normalized_name`
+    )
+    .all() as TaxonomyNameConflictRow[];
+}
+
+function enforceUniqueTaxonomyNames(db: ReturnType<typeof openDatabase>): void {
+  for (const tableName of ["categories", "tags"] as const) {
+    const conflicts = findTaxonomyNameConflicts(db, tableName);
+    if (conflicts.length > 0) {
+      const label = tableName === "categories" ? "Category" : "Tag";
+      const details = conflicts
+        .map((conflict) => `${conflict.normalized_name}: ${conflict.slugs}`)
+        .join("; ");
+      throw new Error(`${label} name conflicts must be resolved before migration: ${details}`);
+    }
+  }
+
+  db.prepare(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_name_normalized ON categories(lower(trim(name)))"
+  ).run();
+  db.prepare(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_normalized ON tags(lower(trim(name)))"
+  ).run();
+}
+
+function backfillTaxonomyDisplayTranslations(db: ReturnType<typeof openDatabase>): void {
+  if (tableExists(db, "categories") && tableExists(db, "category_translations")) {
+    addColumnIfMissing(db, "category_translations", "name", "TEXT NOT NULL DEFAULT ''");
+    db.prepare(
+      `UPDATE category_translations
+       SET name = (
+         SELECT categories.name
+         FROM categories
+         WHERE categories.id = category_translations.category_id
+       )
+       WHERE trim(name) = ''`
+    ).run();
+    for (const locale of ["zh", "en"]) {
+      db.prepare(
+        `INSERT OR IGNORE INTO category_translations (category_id, locale, name, description)
+         SELECT id, ?, name, ''
+         FROM categories`
+      ).run(locale);
+    }
+  }
+
+  if (tableExists(db, "tags") && tableExists(db, "tag_translations")) {
+    for (const locale of ["zh", "en"]) {
+      db.prepare(
+        `INSERT OR IGNORE INTO tag_translations (tag_id, locale, name)
+         SELECT id, ?, name
+         FROM tags`
+      ).run(locale);
+    }
+  }
+}
+
 export function migrate(databasePath = loadConfig().DATABASE_PATH): void {
   const schemaPath = resolveSchemaPath();
   const schema = fs.readFileSync(schemaPath, "utf8");
@@ -154,16 +226,21 @@ export function migrate(databasePath = loadConfig().DATABASE_PATH): void {
     addColumnIfMissing(db, "users", "email", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "users", "avatar_url", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "categories", "sort_order", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "category_translations", "name", "TEXT NOT NULL DEFAULT ''");
     const sessionColumns = columnNames(db, "sessions");
     if (!sessionColumns.has("csrf_token")) {
       db.prepare("ALTER TABLE sessions ADD COLUMN csrf_token TEXT").run();
       db.prepare("DELETE FROM sessions").run();
     }
     backfillPostUids(db);
+    enforceUniqueTaxonomyNames(db);
+    backfillTaxonomyDisplayTranslations(db);
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_uid ON posts(uid)").run();
     db.prepare("UPDATE posts SET status = 'archived' WHERE status = 'hidden'").run();
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (1)").run();
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)").run();
+    db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)").run();
+    db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS posts_uid_required_insert
       BEFORE INSERT ON posts
