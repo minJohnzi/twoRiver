@@ -1,25 +1,40 @@
-import { BulkPostActionInputSchema, PostLifecycleInputSchema, UpsertPostInputSchema } from "@tworiver/shared";
+import { ARTICLE_DOCUMENT_SCHEMA_VERSION } from "@tworiver/content-engine";
+import {
+  ArticleLocaleParamsSchema,
+  BulkPostActionInputSchema,
+  ConvertArticleContentInputSchema,
+  MarkdownConversionPreviewSchema,
+  PostLifecycleInputSchema,
+  UpsertPostInputSchema
+} from "@tworiver/shared";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import {
   bulkUpdatePosts,
+  convertPostTranslationToTiptap,
   createPost,
   getAdminPostById,
+  getPostTranslationState,
   InvalidPostInputError,
   listAdminPosts,
   listTrashedPosts,
   permanentlyDeletePost,
   PostBulkTargetNotFoundError,
   PostSlugConflictError,
+  PostTranslationConversionError,
   PostUpdateConflictError,
   TaxonomyNotFoundError,
   restorePost,
+  restorePostTranslationMarkdown,
   trashPost,
   updatePostLifecycle,
   updatePost
 } from "../repositories/postsRepository.js";
-import { ArticleContentInputError } from "../services/articleContentService.js";
+import {
+  ArticleContentInputError,
+  previewArticleMarkdownConversion
+} from "../services/articleContentService.js";
 import { AiClientNotConfiguredError, AiProviderError } from "../services/ai/aiClient.js";
 import { draftPostTranslation } from "../services/ai/translationDraftService.js";
 import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
@@ -84,6 +99,50 @@ function sendPostError(error: unknown, reply: FastifyReply, log?: FastifyRequest
   }
 
   return false;
+}
+
+function sendArticleConversionError(
+  error: unknown,
+  request: FastifyRequest,
+  reply: FastifyReply,
+  postId: number,
+  locale: "zh" | "en",
+  startedAt: number
+): boolean {
+  if (error instanceof PostUpdateConflictError) {
+    logArticleConversionFailure(request, postId, locale, startedAt, "stale-update");
+    reply.code(409).send({ message: "Post was updated elsewhere" });
+    return true;
+  }
+  if (error instanceof PostTranslationConversionError) {
+    logArticleConversionFailure(request, postId, locale, startedAt, error.code);
+    reply.code(error.statusCode).send({ message: error.message, code: error.code });
+    return true;
+  }
+  if (error instanceof ArticleContentInputError) {
+    logArticleConversionFailure(request, postId, locale, startedAt, error.code);
+    reply.code(400).send({ message: error.publicMessage, code: error.code, path: error.path });
+    return true;
+  }
+  return false;
+}
+
+function logArticleConversionFailure(
+  request: FastifyRequest,
+  postId: number | null,
+  locale: "zh" | "en" | null,
+  startedAt: number,
+  failureCode: string
+): void {
+  request.log.warn(
+    {
+      postId,
+      locale,
+      durationMs: Date.now() - startedAt,
+      failureCode
+    },
+    "Article format conversion failed"
+  );
 }
 
 function containsTiptapContent(input: AdminUpsertPostInput): boolean {
@@ -208,6 +267,133 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
 
       request.log.error({ error }, "Failed to draft post translation");
       reply.code(502).send({ message: "AI translation failed" });
+    }
+  });
+
+  app.post("/api/admin/posts/:id/translations/:locale/tiptap-preview", async (request, reply) => {
+    const startedAt = Date.now();
+    const params = ArticleLocaleParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      logArticleConversionFailure(request, null, null, startedAt, "invalid-params");
+      reply.code(404).send({ message: "Post translation not found" });
+      return;
+    }
+
+    const { id: postId, locale } = params.data;
+    try {
+      const translation = getPostTranslationState(app.db, postId, locale);
+      if (!translation) {
+        throw new PostTranslationConversionError(
+          "translation-not-found",
+          "Post translation not found",
+          404
+        );
+      }
+      if (translation.content_format === "tiptap") {
+        throw new PostTranslationConversionError("already-tiptap", "Translation is already TipTap");
+      }
+
+      const preview = MarkdownConversionPreviewSchema.parse(
+        previewArticleMarkdownConversion(translation.content_markdown)
+      );
+      request.log.info(
+        {
+          postId,
+          locale,
+          blockerCount: preview.blockers.length,
+          warningCount: preview.warnings.length,
+          durationMs: Date.now() - startedAt
+        },
+        "Article format conversion previewed"
+      );
+      return preview;
+    } catch (error) {
+      if (sendArticleConversionError(error, request, reply, postId, locale, startedAt)) {
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/admin/posts/:id/translations/:locale/convert-to-tiptap", async (request, reply) => {
+    const startedAt = Date.now();
+    const params = ArticleLocaleParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      logArticleConversionFailure(request, null, null, startedAt, "invalid-params");
+      reply.code(404).send({ message: "Post translation not found" });
+      return;
+    }
+    const { id: postId, locale } = params.data;
+    const input = ConvertArticleContentInputSchema.safeParse(request.body);
+    if (!input.success) {
+      logArticleConversionFailure(request, postId, locale, startedAt, "invalid-input");
+      reply.code(400).send({ message: "Invalid conversion input" });
+      return;
+    }
+
+    try {
+      const post = convertPostTranslationToTiptap(
+        app.db,
+        postId,
+        locale,
+        input.data.expectedUpdatedAt
+      );
+      request.log.info(
+        {
+          postId,
+          locale,
+          schemaVersion: ARTICLE_DOCUMENT_SCHEMA_VERSION,
+          durationMs: Date.now() - startedAt
+        },
+        "Article converted to TipTap"
+      );
+      return { post };
+    } catch (error) {
+      if (sendArticleConversionError(error, request, reply, postId, locale, startedAt)) {
+        return;
+      }
+      throw error;
+    }
+  });
+
+  app.post("/api/admin/posts/:id/translations/:locale/restore-markdown", async (request, reply) => {
+    const startedAt = Date.now();
+    const params = ArticleLocaleParamsSchema.safeParse(request.params);
+    if (!params.success) {
+      logArticleConversionFailure(request, null, null, startedAt, "invalid-params");
+      reply.code(404).send({ message: "Post translation not found" });
+      return;
+    }
+    const { id: postId, locale } = params.data;
+    const input = ConvertArticleContentInputSchema.safeParse(request.body);
+    if (!input.success) {
+      logArticleConversionFailure(request, postId, locale, startedAt, "invalid-input");
+      reply.code(400).send({ message: "Invalid conversion input" });
+      return;
+    }
+
+    try {
+      const post = restorePostTranslationMarkdown(
+        app.db,
+        postId,
+        locale,
+        input.data.expectedUpdatedAt
+      );
+      request.log.info(
+        {
+          postId,
+          locale,
+          restoreTimestamp: post.updatedAt,
+          durationMs: Date.now() - startedAt
+        },
+        "Article restored to Markdown"
+      );
+      return { post };
+    } catch (error) {
+      if (sendArticleConversionError(error, request, reply, postId, locale, startedAt)) {
+        return;
+      }
+      throw error;
     }
   });
 

@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
 import {
+  ARTICLE_DOCUMENT_SCHEMA_VERSION,
+  extractMarkdownText,
+  previewMarkdownConversion
+} from "@tworiver/content-engine";
+import {
   type BulkPostActionInput,
   type PostLifecycleInput,
   UpsertPostInputSchema,
@@ -8,6 +13,7 @@ import {
   type PostTranslation,
   type ParsedUpsertPostInput,
   type Tag,
+  type Locale
 } from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
 import { prepareArticleContent } from "../services/articleContentService.js";
@@ -69,6 +75,12 @@ interface TranslationRow {
   seo_description: string | null;
 }
 
+export interface PostTranslationStorageRow extends TranslationRow {
+  post_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
 interface TagRow {
   id: number;
   slug: string;
@@ -119,6 +131,24 @@ export class PostUpdateConflictError extends Error {
   constructor() {
     super("Post was updated elsewhere");
     this.name = "PostUpdateConflictError";
+  }
+}
+
+export type PostTranslationConversionFailureCode =
+  | "translation-not-found"
+  | "already-tiptap"
+  | "conversion-blocked"
+  | "restore-unavailable";
+
+export class PostTranslationConversionError extends Error {
+  readonly code: PostTranslationConversionFailureCode;
+  readonly statusCode: 404 | 409;
+
+  constructor(code: PostTranslationConversionFailureCode, message: string, statusCode: 404 | 409 = 409) {
+    super(message);
+    this.name = "PostTranslationConversionError";
+    this.code = code;
+    this.statusCode = statusCode;
   }
 }
 
@@ -819,4 +849,174 @@ function getPostRowById(db: BlogDatabase, id: number): PostRow | undefined {
   return db
     .prepare(`SELECT ${POST_COLUMNS} FROM posts WHERE id = ?`)
     .get(id) as PostRow | undefined;
+}
+
+export function getPostTranslationState(
+  db: BlogDatabase,
+  postId: number,
+  locale: Locale
+): PostTranslationStorageRow | undefined {
+  return db
+    .prepare(
+      `SELECT
+         post_id,
+         locale,
+         title,
+         summary,
+         content_markdown,
+         content_format,
+         content_json,
+         content_schema_version,
+         content_text,
+         migration_source_markdown,
+         migration_source_created_at,
+         seo_title,
+         seo_description,
+         created_at,
+         updated_at
+       FROM post_translations
+       WHERE post_id = ? AND locale = ?`
+    )
+    .get(postId, locale) as PostTranslationStorageRow | undefined;
+}
+
+export function convertPostTranslationToTiptap(
+  db: BlogDatabase,
+  postId: number,
+  locale: Locale,
+  expectedUpdatedAt: string
+): PostRecord {
+  return db.transaction(() => {
+    const post = getPostRowById(db, postId);
+    if (!post) {
+      throw translationNotFoundError();
+    }
+    if (post.updated_at !== expectedUpdatedAt) {
+      throw new PostUpdateConflictError();
+    }
+
+    const translation = getPostTranslationState(db, postId, locale);
+    if (!translation) {
+      throw translationNotFoundError();
+    }
+    if (translation.content_format === "tiptap") {
+      throw new PostTranslationConversionError("already-tiptap", "Translation is already TipTap");
+    }
+
+    const preview = previewMarkdownConversion(translation.content_markdown);
+    if (!preview.canConvert || preview.document === null) {
+      throw new PostTranslationConversionError("conversion-blocked", "Markdown cannot be converted");
+    }
+
+    const prepared = prepareArticleContent({
+      format: "tiptap",
+      schemaVersion: ARTICLE_DOCUMENT_SCHEMA_VERSION,
+      doc: preview.document
+    });
+    const timestamp = nextMutationTimestamp(post.updated_at);
+    const postUpdate = db
+      .prepare("UPDATE posts SET updated_at = ? WHERE id = ? AND updated_at = ?")
+      .run(timestamp, postId, expectedUpdatedAt);
+    if (postUpdate.changes === 0) {
+      throw new PostUpdateConflictError();
+    }
+
+    db.prepare(
+      `UPDATE post_translations
+       SET content_markdown = ?,
+           content_format = 'tiptap',
+           content_json = ?,
+           content_schema_version = ?,
+           content_text = ?,
+           migration_source_markdown = CASE
+             WHEN migration_source_markdown IS NULL AND migration_source_created_at IS NULL THEN ?
+             ELSE migration_source_markdown
+           END,
+           migration_source_created_at = CASE
+             WHEN migration_source_markdown IS NULL AND migration_source_created_at IS NULL THEN ?
+             ELSE migration_source_created_at
+           END,
+           updated_at = ?
+       WHERE post_id = ? AND locale = ?`
+    ).run(
+      prepared.contentMarkdown,
+      prepared.contentJson,
+      prepared.contentSchemaVersion,
+      prepared.contentText,
+      translation.content_markdown,
+      timestamp,
+      timestamp,
+      postId,
+      locale
+    );
+
+    const updatedPost = getAdminPostById(db, postId);
+    if (!updatedPost) {
+      throw translationNotFoundError();
+    }
+    return updatedPost;
+  })();
+}
+
+export function restorePostTranslationMarkdown(
+  db: BlogDatabase,
+  postId: number,
+  locale: Locale,
+  expectedUpdatedAt: string
+): PostRecord {
+  return db.transaction(() => {
+    const post = getPostRowById(db, postId);
+    if (!post) {
+      throw translationNotFoundError();
+    }
+    if (post.updated_at !== expectedUpdatedAt) {
+      throw new PostUpdateConflictError();
+    }
+
+    const translation = getPostTranslationState(db, postId, locale);
+    if (!translation) {
+      throw translationNotFoundError();
+    }
+    if (translation.migration_source_markdown === null) {
+      throw new PostTranslationConversionError("restore-unavailable", "No Markdown snapshot is available");
+    }
+
+    const markdown = translation.migration_source_markdown;
+    const timestamp = nextMutationTimestamp(post.updated_at);
+    const postUpdate = db
+      .prepare("UPDATE posts SET updated_at = ? WHERE id = ? AND updated_at = ?")
+      .run(timestamp, postId, expectedUpdatedAt);
+    if (postUpdate.changes === 0) {
+      throw new PostUpdateConflictError();
+    }
+
+    db.prepare(
+      `UPDATE post_translations
+       SET content_markdown = ?,
+           content_format = 'markdown',
+           content_json = NULL,
+           content_schema_version = NULL,
+           content_text = ?,
+           migration_source_markdown = NULL,
+           migration_source_created_at = NULL,
+           updated_at = ?
+       WHERE post_id = ? AND locale = ?`
+    ).run(markdown, extractMarkdownText(markdown), timestamp, postId, locale);
+
+    const updatedPost = getAdminPostById(db, postId);
+    if (!updatedPost) {
+      throw translationNotFoundError();
+    }
+    return updatedPost;
+  })();
+}
+
+function nextMutationTimestamp(previousTimestamp: string): string {
+  const previousTime = Date.parse(previousTimestamp);
+  const timestamp = Number.isNaN(previousTime) ? Date.now() : Math.max(Date.now(), previousTime + 1);
+  return new Date(timestamp).toISOString();
+}
+
+function translationNotFoundError(): PostTranslationConversionError {
+  return new PostTranslationConversionError("translation-not-found", "Post translation not found", 404);
 }

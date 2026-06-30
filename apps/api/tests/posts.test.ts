@@ -169,6 +169,28 @@ async function createCategory(app: FastifyInstance, cookie: string, csrfToken: s
   return response.json().category;
 }
 
+async function createDraftPost(
+  app: FastifyInstance,
+  auth: { cookie: string; csrfToken: string },
+  slug: string,
+  translations: Array<Record<string, unknown>>
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/admin/posts",
+    headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+    payload: {
+      slug,
+      status: "draft",
+      publishedAt: null,
+      tagSlugs: [],
+      translations
+    }
+  });
+  expect(response.statusCode).toBe(201);
+  return response.json().post;
+}
+
 afterEach(() => {
   for (const directory of tempDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -727,6 +749,296 @@ describe("post routes", () => {
 
       expect(response.statusCode).toBe(409);
       expect(response.json()).toEqual({ message: "TipTap publishing is not enabled" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("previews stored Markdown conversion without mutating translation storage", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const originalMarkdown = "# Preview heading\n\nBody with **bold** text.\n";
+      const post = await createDraftPost(app, auth, "conversion-preview", [
+        { locale: "en", title: "Preview", summary: "", contentMarkdown: originalMarkdown }
+      ]);
+      const before = app.db
+        .prepare(
+          `SELECT p.updated_at AS post_updated_at, pt.*
+           FROM posts p
+           INNER JOIN post_translations pt ON pt.post_id = p.id
+           WHERE p.id = ? AND pt.locale = 'en'`
+        )
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/tiptap-preview`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        originalMarkdown,
+        document: expect.objectContaining({ type: "doc" }),
+        projectedMarkdown: expect.stringContaining("# Preview heading"),
+        canConvert: true,
+        blockers: [],
+        warnings: expect.any(Array)
+      });
+      expect(
+        app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("returns conflict when previewing a TipTap translation", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "tiptap-preview-conflict", [
+        { locale: "en", title: "TipTap", summary: "", content: tiptapContent }
+      ]);
+      const before = app.db
+        .prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'")
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/tiptap-preview`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        message: "Translation is already TipTap",
+        code: "already-tiptap"
+      });
+      expect(
+        app.db.prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'").get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("recomputes conversion at confirmation, snapshots exact Markdown, and isolates the locale", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "confirm-conversion", [
+        { locale: "en", title: "English", summary: "", contentMarkdown: "# Initial\n\nInitial body" },
+        { locale: "zh", title: "Chinese", summary: "", contentMarkdown: "# 中文\n\n保持不变" }
+      ]);
+      const previewResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/tiptap-preview`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(previewResponse.statusCode).toBe(200);
+      const initialProjection = previewResponse.json().projectedMarkdown;
+
+      const latestMarkdown = "# Latest source\n\nFresh body.\n\n\n";
+      const currentUpdatedAt = new Date(Date.parse(post.updatedAt) + 1_000).toISOString();
+      app.db
+        .prepare(
+          `UPDATE post_translations
+           SET content_markdown = ?, content_text = ?, updated_at = ?
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .run(latestMarkdown, "Latest source\nFresh body.", currentUpdatedAt, post.id);
+      app.db.prepare("UPDATE posts SET updated_at = ? WHERE id = ?").run(currentUpdatedAt, post.id);
+      const zhBefore = app.db
+        .prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'zh'")
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: currentUpdatedAt }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      const enTranslation = body.post.translations.find(
+        (translation: { locale: string }) => translation.locale === "en"
+      );
+      const stored = app.db
+        .prepare(
+          `SELECT content_markdown, content_format, content_json, content_schema_version, content_text,
+                  migration_source_markdown, migration_source_created_at
+           FROM post_translations
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .get(post.id) as Record<string, unknown>;
+
+      expect(stored).toEqual(
+        expect.objectContaining({
+          content_format: "tiptap",
+          content_schema_version: 1,
+          content_text: "Latest source\nFresh body.",
+          migration_source_markdown: latestMarkdown,
+          migration_source_created_at: expect.any(String)
+        })
+      );
+      expect(stored.content_markdown).not.toBe(initialProjection);
+      expect(JSON.parse(String(stored.content_json))).toEqual(enTranslation.content.doc);
+      expect(enTranslation).toEqual(
+        expect.objectContaining({
+          canRestoreMarkdown: true,
+          restoreMarkdownSnapshotAt: stored.migration_source_created_at,
+          content: expect.objectContaining({ format: "tiptap", schemaVersion: 1 })
+        })
+      );
+      expect(enTranslation).not.toHaveProperty("migrationSourceMarkdown");
+      expect(enTranslation).not.toHaveProperty("migration_source_markdown");
+      expect(
+        app.db.prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'zh'").get(post.id)
+      ).toEqual(zhBefore);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects stale conversion without writing any translation fields", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "stale-conversion", [
+        { locale: "en", title: "Stale", summary: "", contentMarkdown: "# Stale\n\nBody" }
+      ]);
+      const currentUpdatedAt = new Date(Date.parse(post.updatedAt) + 1_000).toISOString();
+      app.db.prepare("UPDATE posts SET updated_at = ? WHERE id = ?").run(currentUpdatedAt, post.id);
+      const before = app.db
+        .prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'")
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ message: "Post was updated elsewhere" });
+      expect(
+        app.db.prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'").get(post.id)
+      ).toEqual(before);
+      expect(app.db.prepare("SELECT updated_at FROM posts WHERE id = ?").get(post.id)).toEqual({
+        updated_at: currentUpdatedAt
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("restores the exact Markdown snapshot and clears TipTap and snapshot fields", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const originalMarkdown = "# Original\n\nLine one.\n\n\n";
+      const post = await createDraftPost(app, auth, "restore-markdown", [
+        { locale: "en", title: "Restore", summary: "", contentMarkdown: originalMarkdown }
+      ]);
+      const conversionResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+      expect(conversionResponse.statusCode).toBe(200);
+      const convertedPost = conversionResponse.json().post;
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/restore-markdown`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: convertedPost.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(200);
+      const restoredPost = response.json().post;
+      const restoredTranslation = restoredPost.translations.find(
+        (translation: { locale: string }) => translation.locale === "en"
+      );
+      expect(restoredPost.updatedAt).not.toBe(convertedPost.updatedAt);
+      expect(restoredTranslation).toEqual(
+        expect.objectContaining({
+          content: { format: "markdown", markdown: originalMarkdown },
+          contentMarkdown: originalMarkdown,
+          canRestoreMarkdown: false,
+          restoreMarkdownSnapshotAt: null
+        })
+      );
+      expect(
+        app.db
+          .prepare(
+            `SELECT content_markdown, content_format, content_json, content_schema_version, content_text,
+                    migration_source_markdown, migration_source_created_at
+             FROM post_translations
+             WHERE post_id = ? AND locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual({
+        content_markdown: originalMarkdown,
+        content_format: "markdown",
+        content_json: null,
+        content_schema_version: null,
+        content_text: "Original\nLine one.",
+        migration_source_markdown: null,
+        migration_source_created_at: null
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects restoring a new TipTap article without a Markdown snapshot", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "restore-without-snapshot", [
+        { locale: "en", title: "Native TipTap", summary: "", content: tiptapContent }
+      ]);
+      const before = app.db
+        .prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'")
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/restore-markdown`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        message: "No Markdown snapshot is available",
+        code: "restore-unavailable"
+      });
+      expect(
+        app.db.prepare("SELECT * FROM post_translations WHERE post_id = ? AND locale = 'en'").get(post.id)
+      ).toEqual(before);
+      expect(app.db.prepare("SELECT updated_at FROM posts WHERE id = ?").get(post.id)).toEqual({
+        updated_at: post.updatedAt
+      });
     } finally {
       await app.close();
     }

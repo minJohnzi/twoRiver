@@ -4,10 +4,11 @@ import {
   extractMarkdownText,
   migrateArticleDocument,
   normalizeArticleDocument,
+  previewMarkdownConversion,
   projectArticleToMarkdown,
   validateArticleDocument
 } from "@tworiver/content-engine";
-import type { ArticleContent } from "@tworiver/shared";
+import type { ArticleContent, MarkdownConversionPreview } from "@tworiver/shared";
 
 export interface PreparedArticleContent {
   contentFormat: "markdown" | "tiptap";
@@ -57,6 +58,13 @@ export function prepareArticleContent(content: ArticleContent): PreparedArticleC
   } catch (error) {
     throw mapArticleContentError(error);
   }
+}
+
+export function previewArticleMarkdownConversion(markdown: string): MarkdownConversionPreview {
+  return {
+    originalMarkdown: markdown,
+    ...previewMarkdownConversion(markdown)
+  };
 }
 
 function mapArticleContentError(error: unknown): ArticleContentInputError {

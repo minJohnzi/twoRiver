@@ -167,6 +167,34 @@ export const ArticleContentSchema = z.discriminatedUnion("format", [
 ]);
 export type ArticleContent = z.infer<typeof ArticleContentSchema>;
 
+export const ArticleLocaleParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  locale: LocaleSchema
+});
+export type ArticleLocaleParams = z.infer<typeof ArticleLocaleParamsSchema>;
+
+export const ConvertArticleContentInputSchema = z.object({
+  expectedUpdatedAt: DateTimeStringSchema
+});
+export type ConvertArticleContentInput = z.infer<typeof ConvertArticleContentInputSchema>;
+
+export const ConversionIssueSchema = z.object({
+  code: z.string(),
+  line: z.number().int().positive(),
+  message: z.string()
+});
+export type ConversionIssue = z.infer<typeof ConversionIssueSchema>;
+
+export const MarkdownConversionPreviewSchema = z.object({
+  originalMarkdown: z.string(),
+  document: ArticleDocumentSchema.nullable(),
+  projectedMarkdown: z.string().nullable(),
+  canConvert: z.boolean(),
+  blockers: z.array(ConversionIssueSchema),
+  warnings: z.array(ConversionIssueSchema)
+});
+export type MarkdownConversionPreview = z.infer<typeof MarkdownConversionPreviewSchema>;
+
 const PostTranslationMetadataSchema = z.object({
   locale: LocaleSchema,
   title: z.string().min(1),

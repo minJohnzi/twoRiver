@@ -253,4 +253,50 @@ describe("admin parity shared schemas", () => {
       }).expectedUpdatedAt
     ).toBe("2026-06-30T00:00:00.000Z");
   });
+
+  test("exports explicit article conversion contracts", () => {
+    const paramsSchema = schema("ArticleLocaleParamsSchema");
+    const inputSchema = schema("ConvertArticleContentInputSchema");
+    const previewSchema = schema("MarkdownConversionPreviewSchema");
+
+    expect(paramsSchema.parse({ id: "7", locale: "en" })).toEqual({ id: 7, locale: "en" });
+    expect(() => paramsSchema.parse({ id: "0", locale: "en" })).toThrow();
+    expect(() => paramsSchema.parse({ id: "7", locale: "fr" })).toThrow();
+
+    expect(inputSchema.parse({ expectedUpdatedAt: "2026-06-30T00:00:00.000Z" })).toEqual({
+      expectedUpdatedAt: "2026-06-30T00:00:00.000Z"
+    });
+    expect(() => inputSchema.parse({})).toThrow();
+
+    expect(
+      previewSchema.parse({
+        originalMarkdown: "# Intro",
+        document: { type: "doc", content: [{ type: "paragraph" }] },
+        projectedMarkdown: "# Intro",
+        canConvert: true,
+        blockers: [],
+        warnings: [{ code: "normalized-markdown", line: 1, message: "Formatting will be normalized." }]
+      })
+    ).toEqual(
+      expect.objectContaining({
+        originalMarkdown: "# Intro",
+        canConvert: true,
+        blockers: []
+      })
+    );
+  });
+
+  test("defaults Markdown restore metadata without accepting snapshot content", () => {
+    const parsed = shared.PostTranslationSchema.parse({
+      locale: "en",
+      title: "Article",
+      summary: "",
+      contentMarkdown: "Body"
+    });
+
+    expect(parsed.canRestoreMarkdown).toBe(false);
+    expect(parsed.restoreMarkdownSnapshotAt).toBeNull();
+    expect(parsed).not.toHaveProperty("migrationSourceMarkdown");
+    expect(parsed).not.toHaveProperty("migration_source_markdown");
+  });
 });
