@@ -6,12 +6,13 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"shared package has no tests\"",
+    "build": "pnpm --filter @tworiver/content-engine build && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @tworiver/content-engine build && tsc -p tsconfig.json --noEmit",
+    "test": "pnpm --filter @tworiver/content-engine test",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@tworiver/content-engine": "workspace:*",
     "zod": "^3.25.56"
   },
   "devDependencies": {

@@ -1,0 +1,49 @@
+{
+  "name": "@tworiver/content-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./schema": {
+      "types": "./dist/documentTypes.d.ts",
+      "import": "./dist/documentTypes.js"
+    },
+    "./editor": {
+      "types": "./dist/articleExtensions.d.ts",
+      "import": "./dist/articleExtensions.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.27.1",
+    "@tiptap/extension-code-block-lowlight": "3.27.1",
+    "@tiptap/extension-image": "3.27.1",
+    "@tiptap/extension-table": "3.27.1",
+    "@tiptap/extension-unique-id": "3.27.1",
+    "@tiptap/markdown": "3.27.1",
+    "@tiptap/static-renderer": "3.27.1",
+    "@tiptap/starter-kit": "3.27.1",
+    "lowlight": "^3.3.0",
+    "marked": "^15.0.12",
+    "zod": "^3.25.56"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.1"
+  }
+}
