@@ -10,6 +10,7 @@ import {
   type Tag,
 } from "@tworiver/shared";
 import type { BlogDatabase } from "../db/connection.js";
+import { prepareArticleContent } from "../services/articleContentService.js";
 import { normalizeSlug } from "../services/slugService.js";
 import { getCategoryBySlug } from "./categoriesRepository.js";
 import { getTagBySlug } from "./tagsRepository.js";
@@ -58,6 +59,12 @@ interface TranslationRow {
   title: string;
   summary: string;
   content_markdown: string;
+  content_format: "markdown" | "tiptap";
+  content_json: string | null;
+  content_schema_version: number | null;
+  content_text: string;
+  migration_source_markdown: string | null;
+  migration_source_created_at: string | null;
   seo_title: string | null;
   seo_description: string | null;
 }
@@ -108,6 +115,13 @@ export class PostBulkTargetNotFoundError extends Error {
   }
 }
 
+export class PostUpdateConflictError extends Error {
+  constructor() {
+    super("Post was updated elsewhere");
+    this.name = "PostUpdateConflictError";
+  }
+}
+
 export class TaxonomyNotFoundError extends Error {
   constructor(kind: "Category" | "Tag", slug: string) {
     super(`${kind} "${slug}" does not exist`);
@@ -121,11 +135,26 @@ const POST_COLUMNS = `
 `;
 
 function mapTranslation(row: TranslationRow): PostTranslation {
+  const content =
+    row.content_format === "tiptap"
+      ? {
+          format: "tiptap" as const,
+          schemaVersion: row.content_schema_version ?? 1,
+          doc: JSON.parse(row.content_json ?? "{}")
+        }
+      : {
+          format: "markdown" as const,
+          markdown: row.content_markdown
+        };
+
   return {
     locale: row.locale,
     title: row.title,
     summary: row.summary,
+    content,
     contentMarkdown: row.content_markdown,
+    canRestoreMarkdown: row.migration_source_markdown !== null,
+    restoreMarkdownSnapshotAt: row.migration_source_created_at,
     seoTitle: row.seo_title,
     seoDescription: row.seo_description
   };
@@ -205,7 +234,19 @@ function loadCategoryTranslations(db: BlogDatabase, categoryIds: number[]): Map<
 function hydratePost(db: BlogDatabase, row: PostRow): PostRecord {
   const translationRows = db
     .prepare(
-      `SELECT locale, title, summary, content_markdown, seo_title, seo_description
+      `SELECT
+         locale,
+         title,
+         summary,
+         content_markdown,
+         content_format,
+         content_json,
+         content_schema_version,
+         content_text,
+         migration_source_markdown,
+         migration_source_created_at,
+         seo_title,
+         seo_description
        FROM post_translations
        WHERE post_id = ?
        ORDER BY locale ASC`
@@ -274,7 +315,20 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
 
   const translationRows = db
     .prepare(
-      `SELECT post_id, locale, title, summary, content_markdown, seo_title, seo_description
+      `SELECT
+         post_id,
+         locale,
+         title,
+         summary,
+         content_markdown,
+         content_format,
+         content_json,
+         content_schema_version,
+         content_text,
+         migration_source_markdown,
+         migration_source_created_at,
+         seo_title,
+         seo_description
        FROM post_translations
        WHERE post_id IN (${postIdPlaceholders})
        ORDER BY locale ASC`
@@ -326,37 +380,62 @@ function hydratePosts(db: BlogDatabase, rows: PostRow[]): PostRecord[] {
 }
 
 function replacePostRelations(db: BlogDatabase, postId: number, input: ParsedUpsertPostInput, timestamp: string): void {
-  db.prepare("DELETE FROM post_translations WHERE post_id = ?").run(postId);
   db.prepare("DELETE FROM post_tags WHERE post_id = ?").run(postId);
 
-  const insertTranslation = db.prepare(`
+  const upsertTranslation = db.prepare(`
     INSERT INTO post_translations (
       post_id,
       locale,
       title,
       summary,
       content_markdown,
+      content_format,
+      content_json,
+      content_schema_version,
+      content_text,
       seo_title,
       seo_description,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(post_id, locale) DO UPDATE SET
+      title = excluded.title,
+      summary = excluded.summary,
+      content_markdown = excluded.content_markdown,
+      content_format = excluded.content_format,
+      content_json = excluded.content_json,
+      content_schema_version = excluded.content_schema_version,
+      content_text = excluded.content_text,
+      seo_title = excluded.seo_title,
+      seo_description = excluded.seo_description,
+      updated_at = excluded.updated_at
   `);
 
   for (const translation of input.translations) {
-    insertTranslation.run(
+    const prepared = prepareArticleContent(translation.content);
+    upsertTranslation.run(
       postId,
       translation.locale,
       translation.title,
       translation.summary,
-      translation.contentMarkdown,
+      prepared.contentMarkdown,
+      prepared.contentFormat,
+      prepared.contentJson,
+      prepared.contentSchemaVersion,
+      prepared.contentText,
       translation.seoTitle,
       translation.seoDescription,
       timestamp,
       timestamp
     );
   }
+
+  const locales = input.translations.map((translation) => translation.locale);
+  db.prepare(
+    `DELETE FROM post_translations
+     WHERE post_id = ? AND locale NOT IN (${placeholders(locales)})`
+  ).run(postId, ...locales);
 
   const tags = resolveTags(db, input.tagSlugs);
   const insertPostTag = db.prepare("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)");
@@ -485,11 +564,11 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
 
     const now = new Date().toISOString();
     const category = resolveCategory(db, parsed.categorySlug);
-    db.prepare(
+    const updateResult = db.prepare(
       `UPDATE posts
        SET slug = ?, status = ?, category_id = ?, published_at = ?,
            is_pinned = ?, is_featured = ?, cover_url = ?, updated_at = ?
-       WHERE id = ? AND deleted_at IS NULL`
+       WHERE id = ? AND deleted_at IS NULL${parsed.expectedUpdatedAt ? " AND updated_at = ?" : ""}`
     ).run(
         parsed.slug,
         parsed.status,
@@ -499,8 +578,16 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
         parsed.isFeatured ? 1 : 0,
         parsed.coverUrl,
         now,
-        id
+        id,
+        ...(parsed.expectedUpdatedAt ? [parsed.expectedUpdatedAt] : [])
       );
+    if (updateResult.changes === 0) {
+      const current = getPostRowById(db, id);
+      if (current && current.deleted_at === null) {
+        throw new PostUpdateConflictError();
+      }
+      return undefined;
+    }
     replacePostRelations(db, id, parsed, now);
 
     return getAdminPostById(db, id);

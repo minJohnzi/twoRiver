@@ -8,6 +8,7 @@ import { buildApp } from "../src/app.js";
 import { openDatabase } from "../src/db/connection.js";
 import { migrate } from "../src/db/migrate.js";
 import { seedAdmin } from "../src/db/seedAdmin.js";
+import { PostUpdateConflictError, updatePost } from "../src/repositories/postsRepository.js";
 
 const tempDirectories: string[] = [];
 
@@ -117,6 +118,25 @@ async function createTag(app: FastifyInstance, cookie: string, csrfToken: string
   expect(response.statusCode).toBe(201);
   return response.json().tag;
 }
+
+const tiptapContent = {
+  format: "tiptap" as const,
+  schemaVersion: 1,
+  doc: {
+    type: "doc" as const,
+    content: [
+      {
+        type: "heading",
+        attrs: { level: 2 },
+        content: [{ type: "text", text: "Intro" }]
+      },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: "Body" }]
+      }
+    ]
+  }
+};
 
 async function createCategory(app: FastifyInstance, cookie: string, csrfToken: string, slug: string, name = slug) {
   const response = await app.inject({
@@ -426,6 +446,166 @@ describe("post routes", () => {
           })
         ])
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("persists canonical article content and upserts translations by locale", async () => {
+    const app = await createTestApp();
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const createResponse = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "canonical-content",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          translations: [
+            {
+              locale: "en",
+              title: "Canonical",
+              summary: "",
+              content: tiptapContent
+            },
+            {
+              locale: "zh",
+              title: "Legacy translation",
+              summary: "",
+              contentMarkdown: "Legacy body"
+            }
+          ]
+        }
+      });
+
+      expect(createResponse.statusCode).toBe(201);
+      const createdPost = createResponse.json().post;
+      const createdTranslation = createdPost.translations.find(
+        (translation: { locale: string }) => translation.locale === "en"
+      );
+      expect(createdTranslation).toEqual(
+        expect.objectContaining({
+          content: expect.objectContaining({
+            format: "tiptap",
+            schemaVersion: 1,
+            doc: expect.objectContaining({ type: "doc" })
+          }),
+          contentMarkdown: expect.stringContaining("## Intro")
+        })
+      );
+      expect(createdTranslation.content.doc.content[0].attrs.id).toMatch(/^h_/);
+
+      const stored = app.db
+        .prepare(
+          `SELECT
+            content_format,
+            content_json,
+            content_schema_version,
+            content_text,
+            created_at,
+            migration_source_markdown,
+            migration_source_created_at
+           FROM post_translations
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .get(createdPost.id) as {
+        content_format: string;
+        content_json: string;
+        content_schema_version: number;
+        content_text: string;
+        created_at: string;
+        migration_source_markdown: string | null;
+        migration_source_created_at: string | null;
+      };
+      expect(stored).toEqual(
+        expect.objectContaining({
+          content_format: "tiptap",
+          content_schema_version: 1,
+          content_text: expect.stringContaining("Intro"),
+          migration_source_markdown: null,
+          migration_source_created_at: null
+        })
+      );
+      expect(JSON.parse(stored.content_json).content[0].attrs.id).toMatch(/^h_/);
+
+      app.db
+        .prepare(
+          `UPDATE post_translations
+           SET migration_source_markdown = ?, migration_source_created_at = ?
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .run("Original Markdown", "2026-06-30T00:00:00.000Z", createdPost.id);
+
+      const updateResponse = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${createdPost.id}`,
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          slug: "canonical-content",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          expectedUpdatedAt: createdPost.updatedAt,
+          translations: [
+            {
+              locale: "en",
+              title: "Canonical updated",
+              summary: "",
+              content: {
+                ...tiptapContent,
+                doc: {
+                  ...tiptapContent.doc,
+                  content: [
+                    {
+                      type: "heading",
+                      attrs: { level: 2 },
+                      content: [{ type: "text", text: "Updated intro" }]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      });
+
+      expect(updateResponse.statusCode).toBe(200);
+      const updatedStored = app.db
+        .prepare(
+          `SELECT content_format, content_text, created_at, migration_source_markdown, migration_source_created_at
+           FROM post_translations
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .get(createdPost.id);
+      expect(updatedStored).toEqual(
+        expect.objectContaining({
+          content_format: "tiptap",
+          content_text: "Updated intro",
+          created_at: stored.created_at,
+          migration_source_markdown: "Original Markdown",
+          migration_source_created_at: "2026-06-30T00:00:00.000Z"
+        })
+      );
+      expect(
+        app.db
+          .prepare("SELECT COUNT(*) AS count FROM post_translations WHERE post_id = ? AND locale = 'zh'")
+          .get(createdPost.id)
+      ).toEqual({ count: 0 });
+
+      expect(() =>
+        updatePost(app.db, createdPost.id, {
+          slug: "canonical-content",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          expectedUpdatedAt: createdPost.updatedAt,
+          translations: [{ locale: "en", title: "Stale", summary: "", content: tiptapContent }]
+        })
+      ).toThrow(PostUpdateConflictError);
     } finally {
       await app.close();
     }
