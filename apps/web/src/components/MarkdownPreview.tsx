@@ -1,136 +1,18 @@
 import type { Locale } from "@tworiver/shared";
-import { marked } from "marked";
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { hljs } from "../utils/highlight";
-import { sanitizeMarkdownHtml } from "../utils/sanitizeMarkdown";
+import {
+  getMarkdownLabels,
+  renderMarkdownDocument,
+  type RenderedMarkdownDocument
+} from "../utils/renderMarkdownDocument";
 
-marked.use({
-  renderer: {
-    code(token) {
-      const language = token.lang?.split(/\s+/)[0] ?? "";
-      const highlighted =
-        language && hljs.getLanguage(language)
-          ? hljs.highlight(token.text, { language }).value
-          : hljs.highlightAuto(token.text).value;
-      const languageClass = language ? ` class="hljs language-${language}"` : ` class="hljs"`;
-      return `<pre><code${languageClass}>${highlighted}</code></pre>`;
-    }
-  }
-});
+type MarkdownPreviewSource =
+  | { markdown: string; document?: never }
+  | { markdown?: never; document: RenderedMarkdownDocument };
 
-interface MarkdownPreviewProps {
-  markdown: string;
+type MarkdownPreviewProps = MarkdownPreviewSource & {
   locale?: Locale;
-}
-
-function copyLabels(locale: Locale | undefined) {
-  if (locale === "zh") {
-    return {
-      copy: "复制",
-      copied: "已复制",
-      failed: "复制失败"
-    };
-  }
-
-  return {
-    copy: "Copy",
-    copied: "Copied",
-    failed: "Failed"
-  };
-}
-
-function previewLabels(locale: Locale | undefined) {
-  if (locale === "zh") {
-    return {
-      openImage: "打开图片预览",
-      imagePreview: "图片预览",
-      closeImage: "关闭图片预览"
-    };
-  }
-
-  return {
-    openImage: "Open image preview",
-    imagePreview: "Image preview",
-    closeImage: "Close image preview"
-  };
-}
-
-function codeBlockLanguage(code: Element): string {
-  const languageClass = Array.from(code.classList).find((className) => className.startsWith("language-"));
-  return languageClass?.replace("language-", "") || "code";
-}
-
-function enhanceMarkdownHtml(html: string, copyLabel: string, imageLabel: string): string {
-  const template = document.createElement("template");
-  template.innerHTML = html;
-
-  for (const pre of Array.from(template.content.querySelectorAll("pre"))) {
-    const code = pre.querySelector("code");
-    if (!code) {
-      continue;
-    }
-
-    const language = codeBlockLanguage(code);
-    const wrapper = document.createElement("div");
-    wrapper.className = "code-window";
-
-    const header = document.createElement("div");
-    header.className = "code-window-header";
-
-    const dots = document.createElement("div");
-    dots.className = "window-dots";
-    dots.setAttribute("aria-hidden", "true");
-    dots.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
-
-    const tools = document.createElement("div");
-    tools.className = "code-window-tools";
-
-    const languageLabel = document.createElement("span");
-    languageLabel.className = "markdown-code-language";
-    languageLabel.textContent = language;
-
-    const copyButton = document.createElement("button");
-    copyButton.type = "button";
-    copyButton.className = "markdown-copy-button";
-    copyButton.dataset.copyCode = "true";
-    copyButton.dataset.copyLabel = copyLabel;
-    copyButton.textContent = copyLabel;
-    copyButton.setAttribute("aria-label", copyLabel);
-
-    tools.append(languageLabel, copyButton);
-    header.append(dots, tools);
-    pre.before(wrapper);
-    wrapper.append(header, pre);
-  }
-
-  for (const table of Array.from(template.content.querySelectorAll("table"))) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "markdown-table-wrap";
-    table.before(wrapper);
-    wrapper.append(table);
-  }
-
-  for (const image of Array.from(template.content.querySelectorAll("img"))) {
-    image.classList.add("markdown-image");
-    image.setAttribute("decoding", "async");
-
-    if (image.closest("a")) {
-      continue;
-    }
-
-    const button = document.createElement("button");
-    const alt = image.getAttribute("alt")?.trim();
-    button.type = "button";
-    button.className = "markdown-image-button";
-    button.dataset.markdownImage = "true";
-    button.setAttribute("aria-haspopup", "dialog");
-    button.setAttribute("aria-label", alt ? `${imageLabel}: ${alt}` : imageLabel);
-    image.before(button);
-    button.append(image);
-  }
-
-  return template.innerHTML;
-}
+};
 
 function fallbackCopy(text: string): boolean {
   const textarea = document.createElement("textarea");
@@ -159,16 +41,17 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-export function MarkdownPreview({ markdown, locale }: MarkdownPreviewProps) {
-  const labels = useMemo(() => copyLabels(locale), [locale]);
-  const imageLabels = useMemo(() => previewLabels(locale), [locale]);
+export function MarkdownPreview(props: MarkdownPreviewProps) {
+  const { locale } = props;
+  const labels = useMemo(() => getMarkdownLabels(locale), [locale]);
+  const markdown = "markdown" in props ? props.markdown : undefined;
+  const suppliedDocument = "document" in props ? props.document : undefined;
+  const renderedDocument = useMemo(
+    () => suppliedDocument ?? renderMarkdownDocument(markdown ?? "", labels),
+    [labels, markdown, suppliedDocument]
+  );
   const resetTimersRef = useRef<number[]>([]);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
-
-  const renderedMarkdown = useMemo(() => {
-    const sanitizedMarkdown = sanitizeMarkdownHtml(marked.parse(markdown, { async: false }) as string);
-    return enhanceMarkdownHtml(sanitizedMarkdown, labels.copy, imageLabels.openImage);
-  }, [imageLabels.openImage, labels.copy, markdown]);
 
   useEffect(() => {
     const resetTimers = resetTimersRef.current;
@@ -260,9 +143,13 @@ export function MarkdownPreview({ markdown, locale }: MarkdownPreviewProps) {
 
   return (
     <>
-      <article className="markdown-body" onClick={(event) => void handleMarkdownClick(event)} dangerouslySetInnerHTML={{ __html: renderedMarkdown }} />
+      <div
+        className="markdown-body"
+        onClick={(event) => void handleMarkdownClick(event)}
+        dangerouslySetInnerHTML={{ __html: renderedDocument.html }}
+      />
       {previewImage ? (
-        <div className="markdown-image-lightbox" role="dialog" aria-modal="true" aria-label={imageLabels.imagePreview}>
+        <div className="markdown-image-lightbox" role="dialog" aria-modal="true" aria-label={labels.imagePreview}>
           <div
             className="markdown-image-lightbox__backdrop"
             role="presentation"
@@ -272,10 +159,10 @@ export function MarkdownPreview({ markdown, locale }: MarkdownPreviewProps) {
             <button
               className="markdown-image-lightbox__close"
               type="button"
-              aria-label={imageLabels.closeImage}
+              aria-label={labels.closeImage}
               onClick={() => setPreviewImage(null)}
             >
-              x
+              ×
             </button>
             <img src={previewImage.src} alt={previewImage.alt} />
             {previewImage.alt ? <figcaption>{previewImage.alt}</figcaption> : null}
