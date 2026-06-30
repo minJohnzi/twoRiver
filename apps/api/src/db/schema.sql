@@ -66,10 +66,27 @@ CREATE TABLE IF NOT EXISTS post_translations (
   title TEXT NOT NULL,
   summary TEXT NOT NULL DEFAULT '',
   content_markdown TEXT NOT NULL DEFAULT '',
+  content_format TEXT NOT NULL DEFAULT 'markdown'
+    CHECK (content_format IN ('markdown', 'tiptap')),
+  content_json TEXT CHECK (content_json IS NULL OR json_valid(content_json)),
+  content_schema_version INTEGER,
+  content_text TEXT NOT NULL DEFAULT '',
+  migration_source_markdown TEXT,
+  migration_source_created_at TEXT,
   seo_title TEXT,
   seo_description TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  CHECK (
+    (content_format = 'markdown' AND content_json IS NULL AND content_schema_version IS NULL)
+    OR
+    (content_format = 'tiptap' AND content_json IS NOT NULL AND content_schema_version >= 1)
+  ),
+  CHECK (
+    (migration_source_markdown IS NULL AND migration_source_created_at IS NULL)
+    OR
+    (migration_source_markdown IS NOT NULL AND migration_source_created_at IS NOT NULL)
+  ),
   UNIQUE (post_id, locale),
   FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );

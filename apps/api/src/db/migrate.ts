@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { extractMarkdownText } from "@tworiver/content-engine";
 import { loadConfig } from "../config.js";
 import { openDatabase } from "./connection.js";
 
@@ -142,6 +143,116 @@ function addColumnIfMissing(
   }
 }
 
+function hasMigrationVersion(db: ReturnType<typeof openDatabase>, version: number): boolean {
+  if (!tableExists(db, "schema_migrations")) {
+    return false;
+  }
+  return Boolean(db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(version));
+}
+
+function latestMigrationVersion(db: ReturnType<typeof openDatabase>): number {
+  if (!tableExists(db, "schema_migrations")) {
+    return 0;
+  }
+  return Number((db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number }).version);
+}
+
+function createArticleContentGuardTriggers(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS post_translations_article_content_guard_insert
+    BEFORE INSERT ON post_translations
+    FOR EACH ROW
+    WHEN
+      NEW.content_format NOT IN ('markdown', 'tiptap')
+      OR (NEW.content_format = 'markdown' AND (NEW.content_json IS NOT NULL OR NEW.content_schema_version IS NOT NULL))
+      OR (NEW.content_format = 'tiptap' AND (
+        NEW.content_json IS NULL
+        OR NEW.content_schema_version IS NULL
+        OR NEW.content_schema_version < 1
+      ))
+      OR (NEW.content_json IS NOT NULL AND json_valid(NEW.content_json) = 0)
+      OR ((NEW.migration_source_markdown IS NULL) <> (NEW.migration_source_created_at IS NULL))
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid post translation article content fields');
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS post_translations_article_content_guard_update
+    BEFORE UPDATE ON post_translations
+    FOR EACH ROW
+    WHEN
+      NEW.content_format NOT IN ('markdown', 'tiptap')
+      OR (NEW.content_format = 'markdown' AND (NEW.content_json IS NOT NULL OR NEW.content_schema_version IS NOT NULL))
+      OR (NEW.content_format = 'tiptap' AND (
+        NEW.content_json IS NULL
+        OR NEW.content_schema_version IS NULL
+        OR NEW.content_schema_version < 1
+      ))
+      OR (NEW.content_json IS NOT NULL AND json_valid(NEW.content_json) = 0)
+      OR ((NEW.migration_source_markdown IS NULL) <> (NEW.migration_source_created_at IS NULL))
+    BEGIN
+      SELECT RAISE(ABORT, 'invalid post translation article content fields');
+    END;
+  `);
+}
+
+function migratePostTranslationContentV5(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "post_translations")) {
+    return;
+  }
+
+  addColumnIfMissing(
+    db,
+    "post_translations",
+    "content_format",
+    "TEXT NOT NULL DEFAULT 'markdown' CHECK (content_format IN ('markdown', 'tiptap'))"
+  );
+  addColumnIfMissing(
+    db,
+    "post_translations",
+    "content_json",
+    "TEXT CHECK (content_json IS NULL OR json_valid(content_json))"
+  );
+  addColumnIfMissing(db, "post_translations", "content_schema_version", "INTEGER");
+  addColumnIfMissing(db, "post_translations", "content_text", "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, "post_translations", "migration_source_markdown", "TEXT");
+  addColumnIfMissing(db, "post_translations", "migration_source_created_at", "TEXT");
+
+  if (hasMigrationVersion(db, 5)) {
+    createArticleContentGuardTriggers(db);
+    return;
+  }
+
+  const fromVersion = latestMigrationVersion(db);
+  const rows = db
+    .prepare("SELECT id, content_markdown, content_text FROM post_translations ORDER BY id")
+    .all() as Array<{ id: number; content_markdown: string; content_text: string }>;
+  let backfilledRows = 0;
+
+  const runMigration = db.transaction(() => {
+    const updateContentText = db.prepare("UPDATE post_translations SET content_text = ? WHERE id = ?");
+    for (const row of rows) {
+      const contentText = extractMarkdownText(row.content_markdown ?? "");
+      if (row.content_text !== contentText) {
+        updateContentText.run(contentText, row.id);
+        backfilledRows += 1;
+      }
+    }
+    createArticleContentGuardTriggers(db);
+    db.prepare("INSERT INTO schema_migrations (version) VALUES (5)").run();
+  });
+
+  runMigration();
+  console.info(
+    JSON.stringify({
+      event: "post_translation_content_migration",
+      fromVersion,
+      toVersion: 5,
+      scannedRows: rows.length,
+      backfilledRows
+    })
+  );
+}
+
 interface TaxonomyNameConflictRow {
   normalized_name: string;
   slugs: string;
@@ -241,6 +352,7 @@ export function migrate(databasePath = loadConfig().DATABASE_PATH): void {
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)").run();
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (3)").run();
     db.prepare("INSERT OR IGNORE INTO schema_migrations (version) VALUES (4)").run();
+    migratePostTranslationContentV5(db);
     db.exec(`
       CREATE TRIGGER IF NOT EXISTS posts_uid_required_insert
       BEFORE INSERT ON posts

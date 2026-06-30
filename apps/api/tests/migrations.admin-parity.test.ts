@@ -7,6 +7,15 @@ import { migrate } from "../src/db/migrate.js";
 
 const temporaryDirectories: string[] = [];
 
+const articleContentColumns = [
+  "content_format",
+  "content_json",
+  "content_schema_version",
+  "content_text",
+  "migration_source_markdown",
+  "migration_source_created_at"
+];
+
 function createDatabasePath(): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "tworiver-admin-parity-migration-"));
   temporaryDirectories.push(directory);
@@ -97,6 +106,37 @@ describe("admin parity migration", () => {
         content_markdown: "# 旧正文"
       });
 
+      const migratedTranslation = db
+        .prepare(
+          `SELECT
+            content_format,
+            content_json,
+            content_schema_version,
+            content_text,
+            migration_source_markdown,
+            migration_source_created_at
+           FROM post_translations
+           WHERE post_id = ?`
+        )
+        .get(postId) as {
+        content_format: string;
+        content_json: string | null;
+        content_schema_version: number | null;
+        content_text: string;
+        migration_source_markdown: string | null;
+        migration_source_created_at: string | null;
+      };
+      expect(migratedTranslation).toEqual({
+        content_format: "markdown",
+        content_json: null,
+        content_schema_version: null,
+        content_text: migratedTranslation.content_text,
+        migration_source_markdown: null,
+        migration_source_created_at: null
+      });
+      expect(migratedTranslation.content_text).not.toBe("");
+      expect(migratedTranslation.content_text).not.toContain("#");
+
       const tables = new Set(
         (
           db
@@ -140,8 +180,80 @@ describe("admin parity migration", () => {
       );
       expect(tagTranslationColumns).toEqual(new Set(["tag_id", "locale", "name"]));
 
-      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4]);
+      const postTranslationColumns = (db.pragma("table_info(post_translations)") as Array<{ name: string }>).map(
+        (column) => column.name
+      );
+      expect(postTranslationColumns).toEqual(expect.arrayContaining(articleContentColumns));
+
+      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([
+        1, 2, 3, 4, 5
+      ]);
+      expect(db.prepare("SELECT COUNT(*) FROM schema_migrations WHERE version = 5").pluck().get()).toBe(1);
       expect(db.pragma("foreign_key_check")).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("creates fresh dual-format post translation columns and rejects invalid combinations", () => {
+    const databasePath = createDatabasePath();
+    migrate(databasePath);
+
+    const db = openDatabase(databasePath);
+    try {
+      const columns = (db.pragma("table_info(post_translations)") as Array<{ name: string }>).map(
+        (column) => column.name
+      );
+      expect(columns).toEqual(expect.arrayContaining(articleContentColumns));
+
+      const now = "2026-06-30T00:00:00.000Z";
+      db.prepare(
+        `INSERT INTO posts (uid, slug, status, category_id, published_at, created_at, updated_at)
+         VALUES (?, ?, 'draft', NULL, NULL, ?, ?)`
+      ).run("p_00000000-0000-4000-8000-000000000002", "fresh-post", now, now);
+      const postId = Number(db.prepare("SELECT id FROM posts WHERE slug = ?").pluck().get("fresh-post"));
+
+      db.prepare(
+        `INSERT INTO post_translations (
+          post_id, locale, title, summary, content_markdown, seo_title, seo_description, created_at, updated_at
+        ) VALUES (?, 'en', 'Legacy insert', '', 'Legacy body', NULL, NULL, ?, ?)`
+      ).run(postId, now, now);
+      expect(
+        db
+          .prepare(
+            `SELECT content_format, content_json, content_schema_version, content_text, migration_source_markdown, migration_source_created_at
+             FROM post_translations
+             WHERE post_id = ? AND locale = 'en'`
+          )
+          .get(postId)
+      ).toEqual({
+        content_format: "markdown",
+        content_json: null,
+        content_schema_version: null,
+        content_text: "",
+        migration_source_markdown: null,
+        migration_source_created_at: null
+      });
+
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO post_translations (
+              post_id, locale, title, content_markdown, content_format, content_json, content_schema_version, created_at, updated_at
+            ) VALUES (?, 'zh', 'Invalid TipTap', '', 'tiptap', NULL, 1, ?, ?)`
+          )
+          .run(postId, now, now)
+      ).toThrow();
+
+      expect(() =>
+        db
+          .prepare(
+            `UPDATE post_translations
+             SET content_json = '{"type":'
+             WHERE post_id = ? AND locale = 'en'`
+          )
+          .run(postId)
+      ).toThrow();
     } finally {
       db.close();
     }
@@ -163,7 +275,9 @@ describe("admin parity migration", () => {
 
       expect(indexes).toContain("idx_categories_name_normalized");
       expect(indexes).toContain("idx_tags_name_normalized");
-      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([1, 2, 3, 4]);
+      expect(db.prepare("SELECT version FROM schema_migrations ORDER BY version").pluck().all()).toEqual([
+        1, 2, 3, 4, 5
+      ]);
 
       const now = new Date().toISOString();
       db.prepare(
