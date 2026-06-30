@@ -38,6 +38,20 @@ function installIntersectionObserver() {
   });
 }
 
+function rectAt(top: number): DOMRect {
+  return {
+    top,
+    bottom: top + 24,
+    left: 0,
+    right: 0,
+    width: 0,
+    height: 24,
+    x: 0,
+    y: top,
+    toJSON: () => ({})
+  } as DOMRect;
+}
+
 function TocHarness({ locale = "en" }: { locale?: "en" | "zh" }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -56,6 +70,7 @@ function TocHarness({ locale = "en" }: { locale?: "en" | "zh" }) {
 describe("ArticleTableOfContents", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     Reflect.deleteProperty(window, "IntersectionObserver");
     MockIntersectionObserver.instances = [];
   });
@@ -83,10 +98,21 @@ describe("ArticleTableOfContents", () => {
   it("highlights the current section from observed headings and disconnects on cleanup", () => {
     installIntersectionObserver();
     const { unmount } = render(<TocHarness />);
-    const observer = MockIntersectionObserver.instances[0];
+    const observer = MockIntersectionObserver.instances[0]!;
 
     expect(observer.observe).toHaveBeenCalledTimes(3);
     expect(screen.getByRole("link", { name: "Start" })).toHaveAttribute("aria-current", "location");
+
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+    vi.spyOn(document.getElementById("start") as HTMLElement, "getBoundingClientRect").mockReturnValue(rectAt(-120));
+    vi.spyOn(document.getElementById("deep-dive") as HTMLElement, "getBoundingClientRect").mockReturnValue(rectAt(24));
+    vi.spyOn(document.querySelectorAll<HTMLElement>("h1,h2,h3")[2] as HTMLElement, "getBoundingClientRect").mockReturnValue(
+      rectAt(180)
+    );
 
     act(() => {
       observer.trigger(document.getElementById("deep-dive") as Element);
@@ -97,5 +123,28 @@ describe("ArticleTableOfContents", () => {
 
     unmount();
     expect(observer.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the active link aligned with the section nearest the viewport top while scrolling", () => {
+    installIntersectionObserver();
+    render(<TocHarness />);
+
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+
+    vi.spyOn(document.getElementById("start") as HTMLElement, "getBoundingClientRect").mockReturnValue(rectAt(-240));
+    vi.spyOn(document.getElementById("deep-dive") as HTMLElement, "getBoundingClientRect").mockReturnValue(rectAt(-40));
+    vi.spyOn(document.querySelectorAll<HTMLElement>("h1,h2,h3")[2] as HTMLElement, "getBoundingClientRect").mockReturnValue(
+      rectAt(140)
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+
+    expect(screen.getByRole("link", { name: "Deep dive" })).toHaveAttribute("aria-current", "location");
   });
 });

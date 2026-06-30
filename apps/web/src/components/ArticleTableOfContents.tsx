@@ -16,6 +16,25 @@ function findHeadingElement(container: HTMLElement, id: string): HTMLElement | n
   return Array.from(container.querySelectorAll<HTMLElement>("h1,h2,h3")).find((heading) => heading.id === id) ?? null;
 }
 
+function getHeadingActivationOffset() {
+  return Math.max(96, window.innerHeight * 0.16);
+}
+
+function findActiveHeadingId(observedHeadings: HTMLElement[]): string {
+  const activationOffset = getHeadingActivationOffset();
+  let nextActiveId = observedHeadings[0]?.id ?? "";
+
+  for (const heading of observedHeadings) {
+    if (heading.getBoundingClientRect().top <= activationOffset) {
+      nextActiveId = heading.id;
+    } else {
+      break;
+    }
+  }
+
+  return nextActiveId;
+}
+
 export function ArticleTableOfContents({ headings, containerRef, locale }: ArticleTableOfContentsProps) {
   const [activeId, setActiveId] = useState(() => headings[0]?.id ?? "");
   const label = tocLabel(locale);
@@ -50,15 +69,17 @@ export function ArticleTableOfContents({ headings, containerRef, locale }: Artic
       return;
     }
 
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        const currentEntry = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((first, second) => first.boundingClientRect.top - second.boundingClientRect.top)[0];
+    let animationFrame = 0;
+    const updateActiveHeading = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        setActiveId(findActiveHeadingId(observedHeadings));
+      });
+    };
 
-        if (currentEntry?.target instanceof HTMLElement && currentEntry.target.id) {
-          setActiveId(currentEntry.target.id);
-        }
+    const observer = new window.IntersectionObserver(
+      () => {
+        updateActiveHeading();
       },
       {
         root: null,
@@ -71,7 +92,16 @@ export function ArticleTableOfContents({ headings, containerRef, locale }: Artic
       observer.observe(heading);
     }
 
+    updateActiveHeading();
+    window.addEventListener("scroll", updateActiveHeading, { passive: true });
+    window.addEventListener("resize", updateActiveHeading);
+    window.addEventListener("hashchange", updateActiveHeading);
+
     return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("scroll", updateActiveHeading);
+      window.removeEventListener("resize", updateActiveHeading);
+      window.removeEventListener("hashchange", updateActiveHeading);
       observer.disconnect();
     };
   }, [containerRef, headings, supportsObserver]);
@@ -91,6 +121,9 @@ export function ArticleTableOfContents({ headings, containerRef, locale }: Artic
                 className={`article-toc__link article-toc__link--level-${heading.level}`}
                 href={`#${encodeURIComponent(heading.id)}`}
                 aria-current={visibleActiveId === heading.id ? "location" : undefined}
+                onClick={() => {
+                  setActiveId(heading.id);
+                }}
               >
                 {heading.text}
               </a>
