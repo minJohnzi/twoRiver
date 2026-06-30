@@ -1,7 +1,7 @@
 # TwoRiver TipTap 文章编辑器设计规范
 
 - 日期：2026-06-30
-- 状态：待评审
+- 状态：已批准，待实施
 - 适用范围：TwoRiver 后台文章编辑、文章翻译、发布与公开渲染
 - 前置草案：`docs/tiptap-document-engine.md`
 - 决策结论：采用 TipTap 3.x，以 TipTap JSON 作为新文章的权威内容，以 Markdown 作为旧文章格式、兼容投影与导入导出格式
@@ -288,7 +288,8 @@ content_format TEXT NOT NULL DEFAULT 'markdown',
 content_json TEXT,
 content_schema_version INTEGER,
 content_text TEXT NOT NULL DEFAULT '',
-migration_source_markdown TEXT
+migration_source_markdown TEXT,
+migration_source_created_at TEXT
 ```
 
 字段语义：
@@ -299,6 +300,7 @@ migration_source_markdown TEXT
 - `content_schema_version`：仅 TipTap 行为下存在。
 - `content_text`：由权威内容派生，不由客户端决定。
 - `migration_source_markdown`：旧 Markdown 转换时保存的不可变快照；新建 TipTap 正文为 `NULL`。
+- `migration_source_created_at`：生成原 Markdown 快照的 UTC 时间；必须与 `migration_source_markdown` 同时为空或同时存在。
 
 ### 9.2 数据不变量
 
@@ -324,7 +326,7 @@ format = tiptap
 
 1. 添加新列和索引/触发器。
 2. 所有现有记录设为 `content_format = 'markdown'`。
-3. `content_json`、`content_schema_version`、`migration_source_markdown` 保持 `NULL`。
+3. `content_json`、`content_schema_version`、`migration_source_markdown`、`migration_source_created_at` 保持 `NULL`。
 4. 从现有 `content_markdown` 回填 `content_text`。
 5. 不在数据库迁移中自动把任何文章转换为 TipTap。
 
@@ -367,6 +369,8 @@ interface PostTranslation {
   summary: string;
   content: ArticleContent;
   contentMarkdown: string;
+  canRestoreMarkdown: boolean;
+  restoreMarkdownSnapshotAt: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
 }
@@ -417,6 +421,7 @@ POST /api/admin/posts/:id/translations/:locale/convert-to-tiptap
 - 请求携带当前文章 `updatedAt`，防止预检后正文已被其他操作修改；
 - 再次执行转换和校验，不信任前端回传的预检 JSON；
 - 保存原始 Markdown 快照；
+- 同时保存快照生成时间；
 - 切换 `content_format`；
 - 在同一事务写入全部派生字段。
 
@@ -433,6 +438,7 @@ POST /api/admin/posts/:id/translations/:locale/restore-markdown
 - `content_json` 和版本置空；
 - 重新派生 `content_text`；
 - `migration_source_markdown` 置空。
+- `migration_source_created_at` 置空。
 
 新建 TipTap 文章没有原始 Markdown 快照，不能使用该恢复接口，但可以导出当前 Markdown 兼容投影并显式创建 Markdown 副本。
 
