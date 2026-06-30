@@ -47,6 +47,22 @@ async function writeUploadFile(filePath: string): Promise<void> {
   await fs.writeFile(filePath, "image bytes");
 }
 
+function articleImageDocument(url: string) {
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "image",
+        attrs: {
+          src: url,
+          alt: "reference",
+          title: null
+        }
+      }
+    ]
+  };
+}
+
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
@@ -94,6 +110,45 @@ describe("upload orphan cleanup", () => {
       expect(result.removed).toEqual([]);
       await expect(fs.access(postFile)).resolves.toBeUndefined();
       await expect(fs.access(avatarFile)).resolves.toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retains uploads referenced by TipTap article JSON", async () => {
+    const { config, db } = await createTestDatabase();
+
+    try {
+      const postImageUrl = getPostImagePublicUrl("p_12345678-1234-1234-1234-123456789abc", "used-tiptap.png");
+      const post = createPost(db, {
+        slug: "cleanup-tiptap-post",
+        status: "draft",
+        publishedAt: null,
+        tagSlugs: [],
+        translations: [
+          {
+            locale: "en",
+            title: "Cleanup TipTap",
+            summary: "",
+            contentMarkdown: ""
+          }
+        ]
+      });
+      db.prepare(
+        `UPDATE post_translations
+         SET content_markdown = '', content_format = 'tiptap', content_json = ?, content_schema_version = 1, content_text = 'reference'
+         WHERE post_id = ? AND locale = 'en'`
+      ).run(JSON.stringify(articleImageDocument(postImageUrl)), post.id);
+      const postFile = path.join(getPostImageDirectory(config, "p_12345678-1234-1234-1234-123456789abc"), "used-tiptap.png");
+      await writeUploadFile(postFile);
+
+      const result = await cleanupOrphanUploads(config, db, { dryRun: true });
+
+      expect(result.retained).toEqual([
+        "/uploads/images/posts/p_12345678-1234-1234-1234-123456789abc/used-tiptap.png"
+      ]);
+      expect(result.removed).toEqual([]);
+      await expect(fs.access(postFile)).resolves.toBeUndefined();
     } finally {
       db.close();
     }

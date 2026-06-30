@@ -244,6 +244,22 @@ async function uploadResource(
   });
 }
 
+function articleImageDocument(url: string) {
+  return {
+    type: "doc",
+    content: [
+      {
+        type: "image",
+        attrs: {
+          src: url,
+          alt: "reference",
+          title: null
+        }
+      }
+    ]
+  };
+}
+
 afterEach(async () => {
   await Promise.all(tempDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
@@ -634,6 +650,97 @@ describe("admin image uploads", () => {
       });
       expect(deleteResponse.statusCode).toBe(200);
       expect(app.db.prepare("SELECT id FROM resources WHERE url = ?").get(url)).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("counts TipTap resource references without scanning compatibility Markdown", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createPost(app, auth);
+      const uploadResponse = await uploadResource(app, auth, { folder: "shared", filename: "reference.png" });
+      expect(uploadResponse.statusCode).toBe(201);
+      const url = uploadResponse.json().resource.url as string;
+
+      app.db
+        .prepare("UPDATE post_translations SET content_markdown = ? WHERE post_id = ? AND locale = 'en'")
+        .run(`![asset](${url})`, post.id);
+      app.db
+        .prepare(
+          `INSERT INTO post_translations (
+             post_id, locale, title, summary, content_markdown, content_format, content_json, content_schema_version, content_text
+           ) VALUES (?, 'zh', 'TipTap reference', '', '', 'tiptap', ?, 1, 'reference')`
+        )
+        .run(post.id, JSON.stringify(articleImageDocument(url)));
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().resources[0]).toEqual(expect.objectContaining({ url, referenceCount: 2 }));
+
+      const blockedResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url }
+      });
+      expect(blockedResponse.statusCode).toBe(409);
+
+      app.db
+        .prepare("UPDATE post_translations SET content_markdown = ? WHERE post_id = ? AND locale = 'zh'")
+        .run(`![projected](${url})`, post.id);
+      const projectionResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(projectionResponse.statusCode).toBe(200);
+      expect(projectionResponse.json().resources[0]).toEqual(expect.objectContaining({ url, referenceCount: 2 }));
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("conservatively blocks resource deletion when TipTap JSON cannot be validated", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createPost(app, auth);
+      const uploadResponse = await uploadResource(app, auth, { folder: "shared", filename: "corrupt-reference.png" });
+      expect(uploadResponse.statusCode).toBe(201);
+      const url = uploadResponse.json().resource.url as string;
+
+      app.db
+        .prepare(
+          `UPDATE post_translations
+           SET content_markdown = '', content_format = 'tiptap', content_json = ?, content_schema_version = 1, content_text = ''
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .run(JSON.stringify({ type: "doc", content: [{ type: "futureNode" }] }), post.id);
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie }
+      });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json().resources[0]).toEqual(expect.objectContaining({ url, referenceCount: 1 }));
+
+      const blockedResponse = await app.inject({
+        method: "DELETE",
+        url: "/api/admin/resources",
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { url }
+      });
+      expect(blockedResponse.statusCode).toBe(409);
+      expect(blockedResponse.json()).toEqual({ message: "Resource is referenced by published content" });
     } finally {
       await app.close();
     }

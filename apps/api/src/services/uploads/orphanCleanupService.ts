@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AppConfig } from "../../config.js";
 import type { BlogDatabase } from "../../db/connection.js";
 import { getAboutProfile } from "../../repositories/aboutRepository.js";
+import { collectTiptapResourceReferences } from "../resourceReferenceService.js";
 import { getUploadsRoot } from "./uploadPaths.js";
 
 const PUBLIC_UPLOAD_PREFIX = "/uploads/";
@@ -19,7 +20,18 @@ export interface CleanupUploadsResult {
 }
 
 interface PostContentRow {
+  id: number;
+  post_id: number;
+  locale: "zh" | "en";
+  content_format: "markdown" | "tiptap";
   content_markdown: string;
+  content_json: string | null;
+  content_schema_version: number | null;
+}
+
+interface ReferencedUploadPaths {
+  paths: Set<string>;
+  hasInvalidPostContentReferences: boolean;
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -126,19 +138,38 @@ function addReferencedUploadsFromMarkdown(referencedPaths: Set<string>, uploadsR
   }
 }
 
-function collectReferencedUploadPaths(config: AppConfig, db: BlogDatabase): Set<string> {
+function collectReferencedUploadPaths(config: AppConfig, db: BlogDatabase): ReferencedUploadPaths {
   const uploadsRoot = path.resolve(getUploadsRoot(config));
   const referencedPaths = new Set<string>();
-  const postRows = db.prepare("SELECT content_markdown FROM post_translations").all() as PostContentRow[];
+  let hasInvalidPostContentReferences = false;
+  const postRows = db
+    .prepare(
+      `SELECT id, post_id, locale, content_format, content_markdown, content_json, content_schema_version
+       FROM post_translations`
+    )
+    .all() as PostContentRow[];
 
   for (const row of postRows) {
-    addReferencedUploadsFromMarkdown(referencedPaths, uploadsRoot, row.content_markdown);
+    if (row.content_format === "markdown") {
+      addReferencedUploadsFromMarkdown(referencedPaths, uploadsRoot, row.content_markdown);
+      continue;
+    }
+
+    const references = collectTiptapResourceReferences(row);
+    if (references.invalid) {
+      hasInvalidPostContentReferences = true;
+      continue;
+    }
+
+    for (const url of references.urls) {
+      addReferencedUpload(referencedPaths, uploadsRoot, url);
+    }
   }
 
   const aboutProfile = getAboutProfile(db);
   addReferencedUpload(referencedPaths, uploadsRoot, aboutProfile.avatarUrl);
 
-  return referencedPaths;
+  return { paths: referencedPaths, hasInvalidPostContentReferences };
 }
 
 export async function cleanupOrphanUploads(
@@ -147,7 +178,7 @@ export async function cleanupOrphanUploads(
   options: CleanupUploadsOptions = {}
 ): Promise<CleanupUploadsResult> {
   const uploadsRoot = path.resolve(getUploadsRoot(config));
-  const referencedPaths = collectReferencedUploadPaths(config, db);
+  const referencedUploadPaths = collectReferencedUploadPaths(config, db);
   const files = (await walkFiles(uploadsRoot)).map((filePath) => path.resolve(filePath)).sort();
   const retained: string[] = [];
   const removed: string[] = [];
@@ -163,7 +194,10 @@ export async function cleanupOrphanUploads(
       continue;
     }
 
-    if (referencedPaths.has(normalizeFileKey(filePath))) {
+    if (
+      referencedUploadPaths.hasInvalidPostContentReferences ||
+      referencedUploadPaths.paths.has(normalizeFileKey(filePath))
+    ) {
       retained.push(publicUrl);
       continue;
     }
