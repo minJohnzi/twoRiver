@@ -1,3 +1,4 @@
+import { ArticleDocumentSchema } from "@tworiver/content-engine/schema";
 import { z } from "zod";
 import { DateTimeStringSchema, LocaleSchema, PaginationSchema, SlugSchema, hasUniqueLocales } from "./common.js";
 
@@ -147,15 +148,99 @@ export const DetachTaxonomyInputSchema = z.object({
 });
 export type DetachTaxonomyInput = z.infer<typeof DetachTaxonomyInputSchema>;
 
-export const PostTranslationSchema = z.object({
+export const MarkdownArticleContentSchema = z.object({
+  format: z.literal("markdown"),
+  markdown: z.string()
+});
+export type MarkdownArticleContent = z.infer<typeof MarkdownArticleContentSchema>;
+
+export const TiptapArticleContentSchema = z.object({
+  format: z.literal("tiptap"),
+  schemaVersion: z.number().int().positive(),
+  doc: ArticleDocumentSchema
+});
+export type TiptapArticleContent = z.infer<typeof TiptapArticleContentSchema>;
+
+export const ArticleContentSchema = z.discriminatedUnion("format", [
+  MarkdownArticleContentSchema,
+  TiptapArticleContentSchema
+]);
+export type ArticleContent = z.infer<typeof ArticleContentSchema>;
+
+const PostTranslationMetadataSchema = z.object({
   locale: LocaleSchema,
   title: z.string().min(1),
   summary: z.string().default(""),
-  contentMarkdown: z.string().default(""),
   seoTitle: z.string().nullable().default(null),
   seoDescription: z.string().nullable().default(null)
 });
-export type PostTranslation = z.infer<typeof PostTranslationSchema>;
+
+export const PostTranslationSchema = PostTranslationMetadataSchema.extend({
+  content: ArticleContentSchema.optional(),
+  contentMarkdown: z.string().default(""),
+  canRestoreMarkdown: z.boolean().default(false),
+  restoreMarkdownSnapshotAt: DateTimeStringSchema.nullable().default(null)
+}).transform((translation) => {
+  const content = translation.content ?? {
+    format: "markdown" as const,
+    markdown: translation.contentMarkdown
+  };
+  return {
+    ...translation,
+    content,
+    contentMarkdown: translation.contentMarkdown || (content.format === "markdown" ? content.markdown : "")
+  };
+});
+export type ParsedPostTranslation = z.output<typeof PostTranslationSchema>;
+type PostTranslationMetadata = z.output<typeof PostTranslationMetadataSchema>;
+export type PostTranslation = PostTranslationMetadata & {
+  contentMarkdown: string;
+  content?: ArticleContent;
+  canRestoreMarkdown?: boolean;
+  restoreMarkdownSnapshotAt?: string | null;
+};
+
+const CanonicalPostTranslationInputSchema = PostTranslationMetadataSchema.extend({
+  content: ArticleContentSchema,
+  contentMarkdown: z.string().optional()
+})
+  .superRefine((translation, ctx) => {
+    if (translation.contentMarkdown === undefined) {
+      return;
+    }
+
+    const expectedContentMarkdown =
+      translation.content.format === "markdown" ? translation.content.markdown : "";
+    if (translation.contentMarkdown !== expectedContentMarkdown) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["contentMarkdown"],
+        message: "contentMarkdown must not conflict with canonical content"
+      });
+    }
+  })
+  .transform(({ contentMarkdown: _contentMarkdown, ...translation }) => ({
+    ...translation,
+    contentMarkdown: translation.content.format === "markdown" ? translation.content.markdown : ""
+  }));
+
+const LegacyPostTranslationInputSchema = PostTranslationMetadataSchema.extend({
+  contentMarkdown: z.string().default(""),
+  content: z.never().optional()
+}).transform(({ content: _content, ...translation }) => ({
+  ...translation,
+  content: {
+    format: "markdown" as const,
+    markdown: translation.contentMarkdown
+  }
+}));
+
+export const PostTranslationInputSchema = z.union([
+  CanonicalPostTranslationInputSchema,
+  LegacyPostTranslationInputSchema
+]);
+export type ParsedPostTranslationInput = z.output<typeof PostTranslationInputSchema>;
+export type PostTranslationInput = PostTranslation;
 
 export const PublicPostListItemSchema = z.object({
   id: z.number().int().positive(),
@@ -171,13 +256,19 @@ export const PublicPostListItemSchema = z.object({
   tags: z.array(TagSchema),
   translations: z.array(PostTranslationSchema)
 });
-export type PublicPostListItem = z.infer<typeof PublicPostListItemSchema>;
+export type ParsedPublicPostListItem = z.output<typeof PublicPostListItemSchema>;
+export type PublicPostListItem = Omit<ParsedPublicPostListItem, "translations"> & {
+  translations: PostTranslation[];
+};
 
 export const PublicPostSchema = PublicPostListItemSchema.extend({
   createdAt: DateTimeStringSchema,
   updatedAt: DateTimeStringSchema
 });
-export type PublicPost = z.infer<typeof PublicPostSchema>;
+export type ParsedPublicPost = z.output<typeof PublicPostSchema>;
+export type PublicPost = Omit<ParsedPublicPost, "translations"> & {
+  translations: PostTranslation[];
+};
 
 export const PaginatedPostsResponseSchema = z.object({
   posts: z.array(PublicPostListItemSchema),
@@ -185,7 +276,10 @@ export const PaginatedPostsResponseSchema = z.object({
   page: PaginationSchema.shape.page,
   limit: PaginationSchema.shape.limit
 });
-export type PaginatedPostsResponse = z.infer<typeof PaginatedPostsResponseSchema>;
+export type ParsedPaginatedPostsResponse = z.output<typeof PaginatedPostsResponseSchema>;
+export type PaginatedPostsResponse = Omit<ParsedPaginatedPostsResponse, "posts"> & {
+  posts: PublicPostListItem[];
+};
 
 export const UpsertPostInputSchema = z
   .object({
@@ -194,18 +288,22 @@ export const UpsertPostInputSchema = z
     publishedAt: DateTimeStringSchema.nullable(),
     categorySlug: z.string().min(1).nullable().default(null),
     tagSlugs: z.array(z.string().min(1)).default([]),
-    translations: z.array(PostTranslationSchema).min(1),
+    translations: z.array(PostTranslationInputSchema).min(1),
     isPinned: z.boolean().default(false),
     isFeatured: z.boolean().default(false),
-    coverUrl: z.string().trim().default("")
+    coverUrl: z.string().trim().default(""),
+    expectedUpdatedAt: DateTimeStringSchema.optional()
   })
   .refine((value) => hasUniqueLocales(value.translations), {
     path: ["translations"],
     message: "Translation locales must be unique"
   });
 export type ParsedUpsertPostInput = z.output<typeof UpsertPostInputSchema>;
-export type UpsertPostInput = Omit<ParsedUpsertPostInput, "isPinned" | "isFeatured" | "coverUrl"> &
-  Partial<Pick<ParsedUpsertPostInput, "isPinned" | "isFeatured" | "coverUrl">>;
+type UpsertPostInputShape = Omit<ParsedUpsertPostInput, "translations"> & {
+  translations: PostTranslationInput[];
+};
+export type UpsertPostInput = Omit<UpsertPostInputShape, "isPinned" | "isFeatured" | "coverUrl"> &
+  Partial<Pick<UpsertPostInputShape, "isPinned" | "isFeatured" | "coverUrl">>;
 
 export const PostLifecycleInputSchema = z.object({
   status: PostStatusSchema.optional(),

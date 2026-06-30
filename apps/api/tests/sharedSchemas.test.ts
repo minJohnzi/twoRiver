@@ -18,6 +18,40 @@ const translations = [
   }
 ];
 
+const legacyPostPayload = {
+  slug: "legacy-post",
+  status: "draft",
+  publishedAt: null,
+  translations: [
+    {
+      locale: "en",
+      title: "Legacy",
+      summary: "",
+      contentMarkdown: "Legacy body"
+    }
+  ]
+};
+
+const tiptapContent = {
+  format: "tiptap",
+  schemaVersion: 1,
+  doc: { type: "doc", content: [{ type: "paragraph" }] }
+};
+
+const canonicalTiptapPayload = {
+  slug: "canonical-post",
+  status: "draft",
+  publishedAt: null,
+  translations: [
+    {
+      locale: "en",
+      title: "Canonical",
+      summary: "",
+      content: tiptapContent
+    }
+  ]
+};
+
 describe("admin parity shared schemas", () => {
   test("accepts archived as a post status", () => {
     expect(shared.PostStatusSchema.parse("archived")).toBe("archived");
@@ -182,5 +216,41 @@ describe("admin parity shared schemas", () => {
     expect(() => detachSchema.parse({ postIds: [] })).toThrow();
     expect(() => detachSchema.parse({ postIds: [1, 1] })).toThrow();
     expect(() => detachSchema.parse({ postIds: Array.from({ length: 101 }, (_, index) => index + 1) })).toThrow();
+  });
+
+  test("normalizes legacy Markdown post input", () => {
+    const parsed = shared.UpsertPostInputSchema.parse(legacyPostPayload);
+    expect(parsed.translations[0]?.content).toEqual({
+      format: "markdown",
+      markdown: "Legacy body"
+    });
+    expect(shared.UpsertPostInputSchema.parse(parsed).translations[0]?.content).toEqual({
+      format: "markdown",
+      markdown: "Legacy body"
+    });
+  });
+
+  test("accepts canonical TipTap input and rejects dual sources", () => {
+    expect(shared.UpsertPostInputSchema.parse(canonicalTiptapPayload).translations[0]?.content).toEqual(tiptapContent);
+    expect(() =>
+      shared.UpsertPostInputSchema.parse({
+        ...canonicalTiptapPayload,
+        translations: [
+          {
+            ...canonicalTiptapPayload.translations[0],
+            contentMarkdown: "ambiguous"
+          }
+        ]
+      })
+    ).toThrow();
+  });
+
+  test("accepts optimistic concurrency on updates", () => {
+    expect(
+      shared.UpsertPostInputSchema.parse({
+        ...legacyPostPayload,
+        expectedUpdatedAt: "2026-06-30T00:00:00.000Z"
+      }).expectedUpdatedAt
+    ).toBe("2026-06-30T00:00:00.000Z");
   });
 });
