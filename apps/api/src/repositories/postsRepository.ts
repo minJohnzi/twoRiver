@@ -138,6 +138,7 @@ export type PostTranslationConversionFailureCode =
   | "translation-not-found"
   | "already-tiptap"
   | "conversion-blocked"
+  | "format-conversion-required"
   | "restore-unavailable";
 
 export class PostTranslationConversionError extends Error {
@@ -177,14 +178,19 @@ function mapTranslation(row: TranslationRow): PostTranslation {
           markdown: row.content_markdown
         };
 
+  const canRestoreMarkdown =
+    row.content_format === "tiptap" &&
+    row.migration_source_markdown !== null &&
+    row.migration_source_created_at !== null;
+
   return {
     locale: row.locale,
     title: row.title,
     summary: row.summary,
     content,
     contentMarkdown: row.content_markdown,
-    canRestoreMarkdown: row.migration_source_markdown !== null,
-    restoreMarkdownSnapshotAt: row.migration_source_created_at,
+    canRestoreMarkdown,
+    restoreMarkdownSnapshotAt: canRestoreMarkdown ? row.migration_source_created_at : null,
     seoTitle: row.seo_title,
     seoDescription: row.seo_description
   };
@@ -498,6 +504,22 @@ function validatePostInput(input: ParsedUpsertPostInput): void {
   }
 }
 
+function validatePostTranslationFormatChanges(
+  db: BlogDatabase,
+  postId: number,
+  input: ParsedUpsertPostInput
+): void {
+  for (const translation of input.translations) {
+    const existing = getPostTranslationState(db, postId, translation.locale);
+    if (existing && existing.content_format !== translation.content.format) {
+      throw new PostTranslationConversionError(
+        "format-conversion-required",
+        "Article format changes require the dedicated conversion routes"
+      );
+    }
+  }
+}
+
 function postSlugExists(db: BlogDatabase, slug: string, excludedPostId?: number): boolean {
   const row =
     excludedPostId === undefined
@@ -588,6 +610,7 @@ export function updatePost(db: BlogDatabase, id: number, input: unknown): PostRe
       return undefined;
     }
     validatePostInput(parsed);
+    validatePostTranslationFormatChanges(db, id, parsed);
     if (postSlugExists(db, parsed.slug, id)) {
       throw new PostSlugConflictError();
     }
@@ -955,7 +978,7 @@ export function convertPostTranslationToTiptap(
       throw translationNotFoundError();
     }
     return updatedPost;
-  })();
+  }).immediate();
 }
 
 export function restorePostTranslationMarkdown(
@@ -977,7 +1000,11 @@ export function restorePostTranslationMarkdown(
     if (!translation) {
       throw translationNotFoundError();
     }
-    if (translation.migration_source_markdown === null) {
+    if (
+      translation.content_format !== "tiptap" ||
+      translation.migration_source_markdown === null ||
+      translation.migration_source_created_at === null
+    ) {
       throw new PostTranslationConversionError("restore-unavailable", "No Markdown snapshot is available");
     }
 
@@ -1008,7 +1035,7 @@ export function restorePostTranslationMarkdown(
       throw translationNotFoundError();
     }
     return updatedPost;
-  })();
+  }).immediate();
 }
 
 function nextMutationTimestamp(previousTimestamp: string): string {

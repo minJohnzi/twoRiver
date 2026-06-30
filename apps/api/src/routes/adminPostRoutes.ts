@@ -85,6 +85,10 @@ function sendPostError(error: unknown, reply: FastifyReply, log?: FastifyRequest
     reply.code(409).send({ message: "Post was updated elsewhere" });
     return true;
   }
+  if (error instanceof PostTranslationConversionError) {
+    reply.code(error.statusCode).send({ message: error.message, code: error.code });
+    return true;
+  }
   if (error instanceof TaxonomyNotFoundError) {
     reply.code(400).send({ message: error.message });
     return true;
@@ -124,7 +128,22 @@ function sendArticleConversionError(
     reply.code(400).send({ message: error.publicMessage, code: error.code, path: error.path });
     return true;
   }
+  if (isSqliteBusyError(error)) {
+    logArticleConversionFailure(request, postId, locale, startedAt, "database-busy");
+    reply.code(503).send({
+      message: "Article format conversion is temporarily unavailable",
+      code: "database-busy"
+    });
+    return true;
+  }
   return false;
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return error.code === "SQLITE_BUSY" || error.code === "SQLITE_BUSY_SNAPSHOT";
 }
 
 function logArticleConversionFailure(

@@ -1044,6 +1044,315 @@ describe("post routes", () => {
     }
   });
 
+  test("rejects ordinary PUT attempts to downgrade a converted translation to Markdown", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "dedicated-format-change", [
+        { locale: "en", title: "Converted", summary: "", contentMarkdown: "# Original\n\nBody" }
+      ]);
+      const conversionResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+      expect(conversionResponse.statusCode).toBe(200);
+      const convertedPost = conversionResponse.json().post;
+      const before = app.db
+        .prepare(
+          `SELECT p.updated_at AS post_updated_at, pt.*
+           FROM posts p
+           INNER JOIN post_translations pt ON pt.post_id = p.id
+           WHERE p.id = ? AND pt.locale = 'en'`
+        )
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "PUT",
+        url: `/api/admin/posts/${post.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: {
+          slug: "dedicated-format-change",
+          status: "draft",
+          publishedAt: null,
+          tagSlugs: [],
+          expectedUpdatedAt: convertedPost.updatedAt,
+          translations: [
+            { locale: "en", title: "Downgrade", summary: "", contentMarkdown: "# Replacement\n\nNew body" }
+          ]
+        }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        message: "Article format changes require the dedicated conversion routes",
+        code: "format-conversion-required"
+      });
+      expect(
+        app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("hides restore capability when Markdown has a stale snapshot", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "markdown-stale-snapshot", [
+        { locale: "en", title: "Current Markdown", summary: "", contentMarkdown: "# Current\n\nKeep me" }
+      ]);
+      const snapshotAt = "2026-06-30T00:00:00.000Z";
+      app.db
+        .prepare(
+          `UPDATE post_translations
+           SET migration_source_markdown = ?, migration_source_created_at = ?
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .run("# Obsolete\n\nDo not restore", snapshotAt, post.id);
+
+      const detailResponse = await app.inject({
+        method: "GET",
+        url: `/api/admin/posts/${post.id}`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken }
+      });
+      expect(detailResponse.statusCode).toBe(200);
+      expect(detailResponse.json().post.translations[0]).toEqual(
+        expect.objectContaining({
+          content: { format: "markdown", markdown: "# Current\n\nKeep me" },
+          canRestoreMarkdown: false,
+          restoreMarkdownSnapshotAt: null
+        })
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects restoring Markdown with a stale snapshot without writes", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "reject-markdown-snapshot-restore", [
+        { locale: "en", title: "Current Markdown", summary: "", contentMarkdown: "# Current\n\nKeep me" }
+      ]);
+      app.db
+        .prepare(
+          `UPDATE post_translations
+           SET migration_source_markdown = ?, migration_source_created_at = ?
+           WHERE post_id = ? AND locale = 'en'`
+        )
+        .run("# Obsolete\n\nDo not restore", "2026-06-30T00:00:00.000Z", post.id);
+      const before = app.db
+        .prepare(
+          `SELECT p.updated_at AS post_updated_at, pt.*
+           FROM posts p
+           INNER JOIN post_translations pt ON pt.post_id = p.id
+           WHERE p.id = ? AND pt.locale = 'en'`
+        )
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/restore-markdown`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        message: "No Markdown snapshot is available",
+        code: "restore-unavailable"
+      });
+      expect(
+        app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects blocked Markdown conversion without partial writes", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "blocked-conversion", [
+        { locale: "en", title: "Blocked", summary: "", contentMarkdown: "# Tasks\n\n- [ ] unsafe task" }
+      ]);
+      const before = app.db
+        .prepare(
+          `SELECT p.updated_at AS post_updated_at, pt.*
+           FROM posts p
+           INNER JOIN post_translations pt ON pt.post_id = p.id
+           WHERE p.id = ? AND pt.locale = 'en'`
+        )
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        message: "Markdown cannot be converted",
+        code: "conversion-blocked"
+      });
+      expect(
+        app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("rejects stale restore without clearing the snapshot or writing the post", async () => {
+    const app = await createTestApp();
+
+    try {
+      const auth = await loginWithCsrf(app);
+      const post = await createDraftPost(app, auth, "stale-restore", [
+        { locale: "en", title: "Restore", summary: "", contentMarkdown: "# Original\n\nBody" }
+      ]);
+      const conversionResponse = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: post.updatedAt }
+      });
+      expect(conversionResponse.statusCode).toBe(200);
+      const convertedPost = conversionResponse.json().post;
+      const currentUpdatedAt = new Date(Date.parse(convertedPost.updatedAt) + 1_000).toISOString();
+      app.db.prepare("UPDATE posts SET updated_at = ? WHERE id = ?").run(currentUpdatedAt, post.id);
+      const before = app.db
+        .prepare(
+          `SELECT p.updated_at AS post_updated_at, pt.*
+           FROM posts p
+           INNER JOIN post_translations pt ON pt.post_id = p.id
+           WHERE p.id = ? AND pt.locale = 'en'`
+        )
+        .get(post.id);
+
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/admin/posts/${post.id}/translations/en/restore-markdown`,
+        headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+        payload: { expectedUpdatedAt: convertedPost.updatedAt }
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ message: "Post was updated elsewhere" });
+      expect(
+        app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id)
+      ).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test.each(["convert-to-tiptap", "restore-markdown"] as const)(
+    "maps dual-connection WAL contention during %s without partial writes",
+    async (operation) => {
+      const app = await createTestApp();
+      const contender = openDatabase(app.db.name);
+
+      try {
+        expect(Number(app.db.pragma("busy_timeout", { simple: true }))).toBeGreaterThanOrEqual(1_000);
+        const auth = await loginWithCsrf(app);
+        const post = await createDraftPost(app, auth, `wal-busy-${operation}`, [
+          { locale: "en", title: "Busy", summary: "", contentMarkdown: "# Busy\n\nBody" }
+        ]);
+        let expectedUpdatedAt = post.updatedAt;
+        if (operation === "restore-markdown") {
+          const conversionResponse = await app.inject({
+            method: "POST",
+            url: `/api/admin/posts/${post.id}/translations/en/convert-to-tiptap`,
+            headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+            payload: { expectedUpdatedAt }
+          });
+          expect(conversionResponse.statusCode).toBe(200);
+          expectedUpdatedAt = conversionResponse.json().post.updatedAt;
+        }
+
+        const before = app.db
+          .prepare(
+            `SELECT p.updated_at AS post_updated_at, pt.*
+             FROM posts p
+             INNER JOIN post_translations pt ON pt.post_id = p.id
+             WHERE p.id = ? AND pt.locale = 'en'`
+          )
+          .get(post.id);
+        app.db.pragma("busy_timeout = 5");
+        contender.exec("BEGIN IMMEDIATE");
+
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/admin/posts/${post.id}/translations/en/${operation}`,
+          headers: { cookie: auth.cookie, "x-csrf-token": auth.csrfToken },
+          payload: { expectedUpdatedAt }
+        });
+
+        expect(response.statusCode).toBe(503);
+        expect(response.json()).toEqual({
+          message: "Article format conversion is temporarily unavailable",
+          code: "database-busy"
+        });
+        expect(
+          app.db
+            .prepare(
+              `SELECT p.updated_at AS post_updated_at, pt.*
+               FROM posts p
+               INNER JOIN post_translations pt ON pt.post_id = p.id
+               WHERE p.id = ? AND pt.locale = 'en'`
+            )
+            .get(post.id)
+        ).toEqual(before);
+      } finally {
+        if (contender.inTransaction) {
+          contender.exec("ROLLBACK");
+        }
+        contender.close();
+        await app.close();
+      }
+    }
+  );
+
   test("returns conflict for duplicate post slugs on create and update", async () => {
     const app = await createTestApp();
 
