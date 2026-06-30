@@ -147,6 +147,42 @@ describe("PostPage", () => {
     expect(screen.queryByRole("navigation", { name: "On this page" })).not.toBeInTheDocument();
   });
 
+  it("renders canonical TipTap article content instead of compatibility Markdown", async () => {
+    mockedFetchPost.mockResolvedValue({
+      post: {
+        ...postResponse.post,
+        translations: [
+          {
+            ...postResponse.post.translations[0]!,
+            contentMarkdown: "# Compatibility fallback",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: {
+                type: "doc",
+                content: [
+                  {
+                    type: "heading",
+                    attrs: { level: 2, id: "canonical-overview" },
+                    content: [{ type: "text", text: "Canonical overview" }]
+                  },
+                  { type: "paragraph", content: [{ type: "text", text: "Canonical body" }] }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    });
+
+    renderPost("en");
+
+    expect(await screen.findByRole("heading", { name: "English title" })).toBeInTheDocument();
+    expect(screen.getByText("Canonical body")).toBeInTheDocument();
+    expect(screen.queryByText("Compatibility fallback")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Canonical overview" })).toHaveAttribute("href", "#canonical-overview");
+  });
+
   it("uses reduced-motion-safe back-to-top behavior", async () => {
     const scrollTo = vi.fn();
     mockedFetchPost.mockResolvedValue(postResponse);

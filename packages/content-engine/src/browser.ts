@@ -9,4 +9,5 @@ export {
 } from "./documentLimits.js";
 export { collectArticleResourceReferences } from "./collectResourceReferences.js";
 export { extractArticleProse, extractArticleText } from "./extractText.js";
+export { ArticleHtmlRenderError, renderArticleHtml } from "./renderArticleHtml.js";
 export { isAllowedImage, isAllowedLink } from "./urlPolicy.js";

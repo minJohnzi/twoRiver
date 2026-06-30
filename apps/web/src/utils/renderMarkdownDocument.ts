@@ -71,21 +71,36 @@ function headingBaseId(text: string, index: number): string {
 
 function addHeadingIds(template: HTMLTemplateElement): ArticleHeading[] {
   const headings: ArticleHeading[] = [];
-  const uses = new Map<string, number>();
+  const usedIds = new Set<string>();
 
   for (const [index, heading] of Array.from(template.content.querySelectorAll("h1,h2,h3")).entries()) {
     const text = heading.textContent?.trim() ?? "";
-    const baseId = headingBaseId(text, index);
-    const useCount = (uses.get(baseId) ?? 0) + 1;
-    const id = useCount === 1 ? baseId : `${baseId}-${useCount}`;
+    const existingId = heading.getAttribute("id")?.trim();
+    const id = existingId && !usedIds.has(existingId)
+      ? existingId
+      : nextAvailableHeadingId(headingBaseId(text, index), usedIds);
     const level = Number(heading.tagName.slice(1)) as 1 | 2 | 3;
 
-    uses.set(baseId, useCount);
+    usedIds.add(id);
     heading.id = id;
     headings.push({ id, level, text });
   }
 
   return headings;
+}
+
+function nextAvailableHeadingId(baseId: string, usedIds: Set<string>): string {
+  if (!usedIds.has(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}-${suffix}`;
+  while (usedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}-${suffix}`;
+  }
+  return candidate;
 }
 
 function codeBlockLanguage(code: Element): string {
@@ -163,8 +178,8 @@ function enhanceImages(template: HTMLTemplateElement, imageLabel: string): void 
   }
 }
 
-export function renderMarkdownDocument(markdown: string, labels: MarkdownLabels): RenderedMarkdownDocument {
-  const sanitized = sanitizeMarkdownHtml(marked.parse(markdown, { async: false }) as string);
+export function renderHtmlDocument(html: string, labels: MarkdownLabels): RenderedMarkdownDocument {
+  const sanitized = sanitizeMarkdownHtml(html);
   const template = document.createElement("template");
   template.innerHTML = sanitized;
 
@@ -177,4 +192,8 @@ export function renderMarkdownDocument(markdown: string, labels: MarkdownLabels)
     html: template.innerHTML,
     headings
   };
+}
+
+export function renderMarkdownDocument(markdown: string, labels: MarkdownLabels): RenderedMarkdownDocument {
+  return renderHtmlDocument(marked.parse(markdown, { async: false }) as string, labels);
 }

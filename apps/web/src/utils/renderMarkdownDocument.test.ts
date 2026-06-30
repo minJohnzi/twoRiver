@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getMarkdownLabels, renderMarkdownDocument } from "./renderMarkdownDocument";
+import { getMarkdownLabels, renderHtmlDocument, renderMarkdownDocument } from "./renderMarkdownDocument";
 
 describe("renderMarkdownDocument", () => {
   it("returns sanitized HTML and structured H1/H2/H3 headings in one pass", () => {
@@ -29,6 +29,22 @@ describe("renderMarkdownDocument", () => {
     const result = renderMarkdownDocument("# !!!\n\n## ???", getMarkdownLabels("en"));
 
     expect(result.headings.map((heading) => heading.id)).toEqual(["section-1", "section-2"]);
+  });
+
+  it("preserves unique existing heading ids and regenerates missing or colliding ids", () => {
+    const result = renderHtmlDocument(
+      '<h2 id="kept">Kept</h2><h2 id="kept">Kept</h2><h2>Kept</h2>',
+      getMarkdownLabels("en")
+    );
+
+    expect(result.headings).toEqual([
+      { id: "kept", level: 2, text: "Kept" },
+      { id: "kept-2", level: 2, text: "Kept" },
+      { id: "kept-3", level: 2, text: "Kept" }
+    ]);
+    expect(result.html).toContain('id="kept"');
+    expect(result.html).toContain('id="kept-2"');
+    expect(result.html).toContain('id="kept-3"');
   });
 
   it("keeps sanitization and HTML enhancements in the returned document", () => {

@@ -1,5 +1,6 @@
-import type { Locale } from "@tworiver/shared";
+import type { Locale, PostTranslation } from "@tworiver/shared";
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { renderArticleDocument } from "../utils/renderArticleDocument";
 import {
   getMarkdownLabels,
   renderMarkdownDocument,
@@ -7,11 +8,18 @@ import {
 } from "../utils/renderMarkdownDocument";
 
 type MarkdownPreviewSource =
-  | { markdown: string; document?: never }
-  | { markdown?: never; document: RenderedMarkdownDocument };
+  | { markdown: string; document?: never; translation?: never }
+  | { markdown?: never; document: RenderedMarkdownDocument; translation?: never }
+  | {
+      markdown?: never;
+      document?: never;
+      translation: Pick<PostTranslation, "locale" | "content" | "contentMarkdown">;
+    };
 
 type MarkdownPreviewProps = MarkdownPreviewSource & {
   locale?: Locale;
+  postId?: number;
+  slug?: string;
 };
 
 function fallbackCopy(text: string): boolean {
@@ -42,13 +50,22 @@ async function copyText(text: string): Promise<void> {
 }
 
 export function MarkdownPreview(props: MarkdownPreviewProps) {
-  const { locale } = props;
+  const { locale, postId, slug } = props;
   const labels = useMemo(() => getMarkdownLabels(locale), [locale]);
   const markdown = "markdown" in props ? props.markdown : undefined;
   const suppliedDocument = "document" in props ? props.document : undefined;
+  const translation = "translation" in props ? props.translation : undefined;
   const renderedDocument = useMemo(
-    () => suppliedDocument ?? renderMarkdownDocument(markdown ?? "", labels),
-    [labels, markdown, suppliedDocument]
+    () =>
+      suppliedDocument ??
+      (translation
+        ? renderArticleDocument(translation, labels, {
+            locale: locale ?? translation.locale,
+            ...(postId !== undefined ? { postId } : {}),
+            ...(slug !== undefined ? { slug } : {})
+          })
+        : renderMarkdownDocument(markdown ?? "", labels)),
+    [labels, locale, markdown, postId, slug, suppliedDocument, translation]
   );
   const resetTimersRef = useRef<number[]>([]);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);

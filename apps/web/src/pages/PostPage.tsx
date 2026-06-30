@@ -4,7 +4,8 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { fetchPost } from "../api/posts";
 import { ArticleTableOfContents } from "../components/ArticleTableOfContents";
 import { MarkdownPreview } from "../components/MarkdownPreview";
-import { getMarkdownLabels, renderMarkdownDocument } from "../utils/renderMarkdownDocument";
+import { renderArticleDocument } from "../utils/renderArticleDocument";
+import { getMarkdownLabels } from "../utils/renderMarkdownDocument";
 import { getTaxonomyDisplayName } from "../utils/taxonomy";
 
 interface PostPageProps {
@@ -99,8 +100,15 @@ export function PostPage({ locale }: PostPageProps) {
 
   const translation = post ? findTranslation(post.translations, locale) : undefined;
   const renderedDocument = useMemo(
-    () => (translation ? renderMarkdownDocument(translation.contentMarkdown, markdownLabels) : null),
-    [markdownLabels, translation]
+    () =>
+      translation && post
+        ? renderArticleDocument(translation, markdownLabels, {
+            postId: post.id,
+            slug: post.slug,
+            locale: translation.locale
+          })
+        : null,
+    [markdownLabels, post, translation]
   );
   const publishedDate = post ? formatDate(post.publishedAt, locale) : null;
 

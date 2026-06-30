@@ -36,4 +36,31 @@ describe("MarkdownPreview", () => {
     const dialog = screen.getByRole("dialog", { name: "图片预览" });
     expect(within(dialog).getByRole("button", { name: "关闭图片预览" })).toBeInTheDocument();
   });
+
+  it("renders a supplied article translation through the canonical document renderer", () => {
+    render(
+      <MarkdownPreview
+        locale="en"
+        translation={{
+          locale: "en",
+          contentMarkdown: "# Fallback",
+          content: {
+            format: "tiptap",
+            schemaVersion: 1,
+            doc: {
+              type: "doc",
+              content: [
+                { type: "heading", attrs: { level: 2, id: "rich" }, content: [{ type: "text", text: "Rich heading" }] },
+                { type: "paragraph", content: [{ type: "text", text: "Canonical body" }] }
+              ]
+            }
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Rich heading" })).toHaveAttribute("id", "rich");
+    expect(screen.getByText("Canonical body")).toBeInTheDocument();
+    expect(screen.queryByText("Fallback")).not.toBeInTheDocument();
+  });
 });
