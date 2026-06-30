@@ -139,6 +139,7 @@ export type PostTranslationConversionFailureCode =
   | "already-tiptap"
   | "conversion-blocked"
   | "format-conversion-required"
+  | "invalid-migration-snapshot"
   | "restore-unavailable";
 
 export class PostTranslationConversionError extends Error {
@@ -443,6 +444,14 @@ function replacePostRelations(db: BlogDatabase, postId: number, input: ParsedUps
       content_json = excluded.content_json,
       content_schema_version = excluded.content_schema_version,
       content_text = excluded.content_text,
+      migration_source_markdown = CASE
+        WHEN excluded.content_format = 'markdown' THEN NULL
+        ELSE migration_source_markdown
+      END,
+      migration_source_created_at = CASE
+        WHEN excluded.content_format = 'markdown' THEN NULL
+        ELSE migration_source_created_at
+      END,
       seo_title = excluded.seo_title,
       seo_description = excluded.seo_description,
       updated_at = excluded.updated_at
@@ -924,6 +933,15 @@ export function convertPostTranslationToTiptap(
     }
     if (translation.content_format === "tiptap") {
       throw new PostTranslationConversionError("already-tiptap", "Translation is already TipTap");
+    }
+    if (
+      translation.migration_source_markdown !== null ||
+      translation.migration_source_created_at !== null
+    ) {
+      throw new PostTranslationConversionError(
+        "invalid-migration-snapshot",
+        "Markdown contains an invalid migration snapshot"
+      );
     }
 
     const preview = previewMarkdownConversion(translation.content_markdown);
