@@ -508,3 +508,92 @@
   background: transparent;
   padding-inline: 4px;
 }
+
+.article-rich-editor .ProseMirror {
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.72;
+}
+
+.article-rich-editor .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+
+.article-rich-editor .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+
+.article-rich-editor .ProseMirror h1,
+.article-rich-editor .ProseMirror h2,
+.article-rich-editor .ProseMirror h3,
+.article-rich-editor .ProseMirror h4,
+.article-rich-editor .ProseMirror h5,
+.article-rich-editor .ProseMirror h6 {
+  color: var(--color-heading);
+  line-height: 1.18;
+  margin: 1.2em 0 0.45em;
+}
+
+.article-rich-editor .ProseMirror p,
+.article-rich-editor .ProseMirror ul,
+.article-rich-editor .ProseMirror ol,
+.article-rich-editor .ProseMirror blockquote,
+.article-rich-editor .ProseMirror pre,
+.article-rich-editor .ProseMirror table {
+  margin-block: 14px;
+}
+
+.article-rich-editor .ProseMirror ul,
+.article-rich-editor .ProseMirror ol {
+  padding-left: 1.4em;
+}
+
+.article-rich-editor .ProseMirror blockquote {
+  border-left: 3px solid rgba(125, 211, 252, 0.48);
+  color: var(--color-muted);
+  padding-left: 14px;
+}
+
+.article-rich-editor .ProseMirror pre {
+  overflow-x: auto;
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.72);
+  padding: 14px;
+}
+
+.article-rich-editor .ProseMirror code {
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.14);
+  padding: 0.1em 0.35em;
+}
+
+.article-rich-editor .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.article-rich-editor .ProseMirror img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 14px;
+  margin-block: 16px;
+}
+
+.article-rich-editor .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.article-rich-editor .ProseMirror th,
+.article-rich-editor .ProseMirror td {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+
+.article-rich-editor .ProseMirror th {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-heading);
+  font-weight: 650;
+}
