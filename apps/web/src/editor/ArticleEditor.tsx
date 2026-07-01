@@ -2,8 +2,14 @@ import { articleExtensions } from "@tworiver/content-engine/editor";
 import { validateArticleDocument } from "@tworiver/content-engine";
 import type { ArticleDocument } from "@tworiver/content-engine/browser";
 import type { Locale } from "@tworiver/shared";
+import { FileHandler } from "@tiptap/extension-file-handler";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  ARTICLE_IMAGE_MIME_TYPES,
+  type ArticleImageUploadController,
+  type ImageInsertContext
+} from "./useArticleImageUpload";
 
 export interface ArticleEditorProps {
   value: ArticleDocument;
@@ -11,6 +17,8 @@ export interface ArticleEditorProps {
   onChange: (value: ArticleDocument) => void;
   onInvalidContent?: (error: unknown) => void;
   onRequestImage?: (editor: Editor) => void;
+  imageUploadController?: ArticleImageUploadController;
+  imageUploadNotice?: string | null;
   readOnly?: boolean;
   ariaLabel?: string;
 }
@@ -149,6 +157,8 @@ export function ArticleEditor({
   onChange,
   onInvalidContent,
   onRequestImage,
+  imageUploadController,
+  imageUploadNotice,
   readOnly = false,
   ariaLabel
 }: ArticleEditorProps) {
@@ -157,7 +167,33 @@ export function ArticleEditor({
   const validatedDocumentKey = serializeDocument(validation.document);
   const onChangeRef = useRef(onChange);
   const onInvalidContentRef = useRef(onInvalidContent);
+  const imageUploadControllerRef = useRef(imageUploadController);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const pendingImageContextRef = useRef<ImageInsertContext | null>(null);
   const applyingExternalValueRef = useRef(false);
+  const hasImageUploadController = Boolean(imageUploadController);
+
+  const editorExtensions = useMemo(
+    () => {
+      if (!hasImageUploadController) {
+        return articleExtensions;
+      }
+
+      return [
+        ...articleExtensions,
+        FileHandler.configure({
+          allowedMimeTypes: [...ARTICLE_IMAGE_MIME_TYPES],
+          onPaste(currentEditor, files) {
+            imageUploadControllerRef.current?.onPasteFiles(files, currentEditor);
+          },
+          onDrop(currentEditor, files, position) {
+            imageUploadControllerRef.current?.onDropFiles(files, position, currentEditor);
+          }
+        })
+      ];
+    },
+    [hasImageUploadController]
+  );
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -168,6 +204,10 @@ export function ArticleEditor({
   }, [onInvalidContent]);
 
   useEffect(() => {
+    imageUploadControllerRef.current = imageUploadController;
+  }, [imageUploadController]);
+
+  useEffect(() => {
     if (validation.error) {
       onInvalidContentRef.current?.(validation.error);
     }
@@ -175,7 +215,7 @@ export function ArticleEditor({
 
   const editor = useEditor(
     {
-      extensions: articleExtensions,
+      extensions: editorExtensions,
       content: validation.document ?? EMPTY_ARTICLE_DOCUMENT,
       editable: !readOnly && validation.error === null,
       injectCSS: false,
@@ -201,7 +241,7 @@ export function ArticleEditor({
         onChangeRef.current(nextEditor.getJSON() as ArticleDocument);
       }
     },
-    []
+    [editorExtensions]
   );
 
   useEffect(() => {
@@ -227,6 +267,36 @@ export function ArticleEditor({
     }
   }, [editor, validatedDocumentKey, validation.document]);
 
+  const handleRequestImage = useCallback(
+    (currentEditor: Editor) => {
+      if (imageUploadControllerRef.current) {
+        pendingImageContextRef.current = {
+          editor: currentEditor,
+          position: currentEditor.state.selection.from
+        };
+        imageInputRef.current?.click();
+        return;
+      }
+
+      onRequestImage?.(currentEditor);
+    },
+    [onRequestImage]
+  );
+
+  const handleImageInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+
+    const context = pendingImageContextRef.current;
+    pendingImageContextRef.current = null;
+
+    if (!file || !context) {
+      return;
+    }
+
+    void imageUploadControllerRef.current?.chooseFile(file, context);
+  }, []);
+
   if (validation.error) {
     return (
       <section className="article-rich-editor article-rich-editor--invalid">
@@ -237,14 +307,33 @@ export function ArticleEditor({
     );
   }
 
+  const uploadNotice =
+    imageUploadNotice ??
+    (imageUploadController?.isUploading ? (locale === "zh" ? "图片上传中…" : "Uploading image…") : null);
+
   return (
     <section className="article-rich-editor" data-locale={locale}>
       {editor ? (
         <ArticleEditorToolbar
           editor={editor}
           locale={locale}
-          {...(onRequestImage ? { onRequestImage } : {})}
+          onRequestImage={handleRequestImage}
+          isImageUploading={imageUploadController?.isUploading ?? false}
         />
+      ) : null}
+      <input
+        ref={imageInputRef}
+        className="article-rich-editor__file-input"
+        type="file"
+        accept={ARTICLE_IMAGE_MIME_TYPES.join(",")}
+        onChange={handleImageInputChange}
+        tabIndex={-1}
+        aria-hidden="true"
+      />
+      {uploadNotice ? (
+        <p className="article-rich-editor__notice" role="status">
+          {uploadNotice}
+        </p>
       ) : null}
       <EditorContent editor={editor} />
     </section>
@@ -254,11 +343,13 @@ export function ArticleEditor({
 function ArticleEditorToolbar({
   editor,
   locale,
-  onRequestImage
+  onRequestImage,
+  isImageUploading = false
 }: {
   editor: Editor;
   locale: Locale;
   onRequestImage?: (editor: Editor) => void;
+  isImageUploading?: boolean;
 }) {
   const state = useEditorState({
     editor,
@@ -266,7 +357,7 @@ function ArticleEditorToolbar({
   });
   const actions = useMemo(() => toolbarActionsFromEditor(editor, onRequestImage), [editor, onRequestImage]);
 
-  return <ArticleEditorToolbarView locale={locale} state={state} actions={actions} />;
+  return <ArticleEditorToolbarView locale={locale} state={state} actions={actions} isImageUploading={isImageUploading} />;
 }
 
 function toolbarStateFromEditor(editor: Editor): ArticleEditorToolbarState {
@@ -331,11 +422,13 @@ function toolbarActionsFromEditor(editor: Editor, onRequestImage?: (editor: Edit
 export function ArticleEditorToolbarView({
   locale,
   state,
-  actions
+  actions,
+  isImageUploading = false
 }: {
   locale: Locale;
   state: ArticleEditorToolbarState;
   actions: ArticleEditorToolbarActions;
+  isImageUploading?: boolean;
 }) {
   const labels = editorLabels(locale);
   const [isLinkOpen, setIsLinkOpen] = useState(false);
@@ -427,7 +520,7 @@ export function ArticleEditorToolbarView({
             ))}
           </select>
         </label>
-        <ToolbarButton label={labels.image} disabled={disabled} onClick={actions.requestImage} />
+        <ToolbarButton label={labels.image} disabled={disabled || isImageUploading} onClick={actions.requestImage} />
         <ToolbarButton label={labels.horizontalRule} disabled={disabled} onClick={actions.insertHorizontalRule} />
       </div>
       <div className="article-rich-editor__toolbar-group">

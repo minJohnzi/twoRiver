@@ -1,8 +1,9 @@
 import "@testing-library/jest-dom/vitest";
+import type { ArticleDocument } from "@tworiver/content-engine/browser";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PublicPost } from "@tworiver/shared";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAdminTag,
   createAdminPost,
@@ -42,6 +43,35 @@ const mockedTranslateAdminPostDraft = vi.mocked(translateAdminPostDraft);
 const mockedUpdateAdminPost = vi.mocked(updateAdminPost);
 const mockedUploadAdminPostImage = vi.mocked(uploadAdminPostImage);
 
+function emptyClientRects(): DOMRectList {
+  return {
+    length: 0,
+    item: () => null,
+    [Symbol.iterator]: function* iterator() {
+      // empty DOMRectList
+    }
+  } as DOMRectList;
+}
+
+function emptyBoundingRect(): DOMRect {
+  return {
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    toJSON: () => ({})
+  } as DOMRect;
+}
+
+const tiptapDocument: ArticleDocument = {
+  type: "doc",
+  content: [{ type: "paragraph", content: [{ type: "text", text: "TipTap body" }] }]
+};
+
 function makePost(overrides: Partial<PublicPost> = {}): PublicPost {
   return {
     id: 1,
@@ -73,6 +103,36 @@ function makePost(overrides: Partial<PublicPost> = {}): PublicPost {
     ],
     ...overrides
   };
+}
+
+function makeTiptapPost(overrides: Partial<PublicPost> = {}): PublicPost {
+  return makePost({
+    translations: [
+      {
+        locale: "zh",
+        title: "中文草稿",
+        summary: "",
+        contentMarkdown: "中文 Markdown",
+        content: { format: "markdown", markdown: "中文 Markdown" },
+        seoTitle: null,
+        seoDescription: null
+      },
+      {
+        locale: "en",
+        title: "TipTap Draft",
+        summary: "",
+        contentMarkdown: "TipTap body\n",
+        content: {
+          format: "tiptap",
+          schemaVersion: 1,
+          doc: tiptapDocument
+        },
+        seoTitle: null,
+        seoDescription: null
+      }
+    ],
+    ...overrides
+  });
 }
 
 function renderEditor(route: string, locale: "zh" | "en" = "en") {
@@ -188,8 +248,31 @@ describe("MarkdownPreview", () => {
 });
 
 describe("admin editor image uploads", () => {
+  beforeAll(() => {
+    if (!Range.prototype.getClientRects) {
+      Range.prototype.getClientRects = emptyClientRects;
+    }
+    if (!Range.prototype.getBoundingClientRect) {
+      Range.prototype.getBoundingClientRect = emptyBoundingRect;
+    }
+    if (!("getClientRects" in Text.prototype)) {
+      Object.defineProperty(Text.prototype, "getClientRects", {
+        configurable: true,
+        value: emptyClientRects
+      });
+    }
+    if (!("getBoundingClientRect" in Text.prototype)) {
+      Object.defineProperty(Text.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: emptyBoundingRect
+      });
+    }
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "false");
+    vi.stubEnv("VITE_TIPTAP_PUBLISH_ENABLED", "false");
     mockedFetchAdminCategories.mockResolvedValue({ categories: [] });
     mockedFetchAdminTags.mockResolvedValue({
       tags: [
@@ -221,6 +304,7 @@ describe("admin editor image uploads", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     cleanup();
   });
 
@@ -372,6 +456,124 @@ describe("admin editor image uploads", () => {
 
     expect(await screen.findByText("Upload failed")).toBeInTheDocument();
     expect(textarea).toHaveValue("Hello world");
+  });
+
+  it("opens existing TipTap translations with the article editor while keeping Markdown locales unchanged", async () => {
+    mockedFetchAdminPost.mockResolvedValue({ post: makeTiptapPost() });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Markdown editor mode" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "中文" }));
+
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue("中文 Markdown");
+  });
+
+  it("preserves unsaved TipTap JSON across locale switches and saves canonical content with expectedUpdatedAt", async () => {
+    const originalUpdatedAt = "2026-06-10T00:00:00.000Z";
+    mockedFetchAdminPost.mockResolvedValue({ post: makeTiptapPost({ updatedAt: originalUpdatedAt }) });
+    mockedUpdateAdminPost.mockResolvedValue({ post: makeTiptapPost({ updatedAt: "2026-06-11T00:00:00.000Z" }) });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }));
+    fireEvent.click(screen.getByRole("button", { name: "中文" }));
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue("中文 Markdown");
+    fireEvent.click(screen.getByRole("button", { name: "EN" }));
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    await waitFor(() =>
+      expect(mockedUpdateAdminPost).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          expectedUpdatedAt: originalUpdatedAt,
+          translations: expect.arrayContaining([
+            expect.objectContaining({
+              locale: "en",
+              content: expect.objectContaining({
+                format: "tiptap",
+                schemaVersion: 1,
+                doc: expect.objectContaining({
+                  type: "doc",
+                  content: expect.arrayContaining([expect.objectContaining({ type: "horizontalRule" })])
+                })
+              }),
+              contentMarkdown: ""
+            }),
+            expect.objectContaining({
+              locale: "zh",
+              content: { format: "markdown", markdown: "中文 Markdown" }
+            })
+          ])
+        })
+      )
+    );
+  });
+
+  it("disables TipTap publishing while the publish feature flag is off", async () => {
+    mockedFetchAdminPost.mockResolvedValue({ post: makeTiptapPost() });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    const publishButton = screen.getByRole("button", { name: "Publish" });
+    expect(publishButton).toBeDisabled();
+    expect(publishButton).toHaveAttribute("title", "TipTap publishing is not enabled yet. Save a draft first.");
+
+    fireEvent.click(publishButton);
+    expect(mockedUpdateAdminPost).not.toHaveBeenCalled();
+  });
+
+  it("shows the new rich-text entry only when the new article flag is enabled", async () => {
+    renderEditor("/admin/posts/new");
+
+    expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use rich text" })).not.toBeInTheDocument();
+    cleanup();
+
+    vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
+    renderEditor("/admin/posts/new");
+
+    expect(await screen.findByRole("button", { name: /Use Markdown/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+  });
+
+  it("warns on unsaved TipTap changes and clears the warning after a successful save baseline", async () => {
+    mockedFetchAdminPost.mockResolvedValue({ post: makeTiptapPost() });
+    mockedUpdateAdminPost.mockResolvedValue({ post: makeTiptapPost({ updatedAt: "2026-06-11T00:00:00.000Z" }) });
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    const initialBeforeUnloadAdds = addEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length;
+    const initialBeforeUnloadRemoves = removeEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }));
+    await waitFor(() =>
+      expect(addEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length).toBeGreaterThan(
+        initialBeforeUnloadAdds
+      )
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    await waitFor(() => expect(mockedUpdateAdminPost).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(removeEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length).toBeGreaterThan(
+        initialBeforeUnloadRemoves
+      )
+    );
+    addEventListener.mockRestore();
+    removeEventListener.mockRestore();
   });
 
   it("shows a markdown heading outline outside fenced code blocks", async () => {

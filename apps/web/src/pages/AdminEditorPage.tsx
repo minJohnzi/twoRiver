@@ -1,4 +1,11 @@
-import type { Category, Locale, PostStatus, PostTranslation, Tag, UpsertPostInput } from "@tworiver/shared";
+import {
+  ARTICLE_DOCUMENT_SCHEMA_VERSION,
+  extractArticleProse,
+  projectArticleToMarkdown,
+  validateArticleDocument,
+  type ArticleDocument
+} from "@tworiver/content-engine";
+import type { ArticleContent, Category, Locale, PostStatus, PostTranslation, PublicPost, Tag, UpsertPostInput } from "@tworiver/shared";
 import {
   type ClipboardEvent,
   type DragEvent,
@@ -24,13 +31,24 @@ import {
   uploadAdminPostImage
 } from "../api/admin";
 import { MarkdownPreview } from "../components/MarkdownPreview";
+import { ArticleEditor } from "../editor/ArticleEditor";
+import { ArticleFormatActions } from "../editor/ArticleFormatActions";
+import { useArticleImageUpload } from "../editor/useArticleImageUpload";
+import { useUnsavedArticleWarning } from "../editor/useUnsavedArticleWarning";
 import { getTaxonomyDisplayName, getTaxonomySearchText } from "../utils/taxonomy";
 
 interface AdminEditorPageProps {
   locale: Locale;
 }
 
-type TranslationDraft = Record<Locale, Pick<PostTranslation, "title" | "summary" | "contentMarkdown">>;
+interface TranslationDraft {
+  title: string;
+  summary: string;
+  content: ArticleContent;
+  contentMarkdown: string;
+}
+
+type TranslationDrafts = Record<Locale, TranslationDraft>;
 type SaveAction = "draft" | "save" | "publish" | "hide" | "republish" | null;
 type ActionNotice = { tone: "pending" | "success" | "error"; title: string; detail: string };
 type MarkdownEditorMode = "source" | "split" | "preview";
@@ -48,10 +66,7 @@ interface SearchMatch {
   end: number;
 }
 
-const EMPTY_TRANSLATIONS: TranslationDraft = {
-  zh: { title: "", summary: "", contentMarkdown: "" },
-  en: { title: "", summary: "", contentMarkdown: "" }
-};
+const EMPTY_MARKDOWN_CONTENT: ArticleContent = { format: "markdown", markdown: "" };
 
 const POST_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_IMAGE_ALT = "图片";
@@ -59,10 +74,55 @@ const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", 
 const EMPTY_SEARCH_STATE: MarkdownSearchState = { isOpen: false, query: "", currentIndex: 0 };
 const MARKDOWN_EDITOR_MODES: MarkdownEditorMode[] = ["source", "split", "preview"];
 
-function cloneTranslations(): TranslationDraft {
+function isTiptapNewArticleEnabled(): boolean {
+  return import.meta.env.VITE_TIPTAP_NEW_ARTICLE_ENABLED === "true";
+}
+
+function isTiptapPublishEnabled(): boolean {
+  return import.meta.env.VITE_TIPTAP_PUBLISH_ENABLED === "true";
+}
+
+function emptyArticleDocument(): ArticleDocument {
   return {
-    zh: { ...EMPTY_TRANSLATIONS.zh },
-    en: { ...EMPTY_TRANSLATIONS.en }
+    type: "doc",
+    content: [{ type: "paragraph" }]
+  };
+}
+
+function createMarkdownDraft(overrides: Partial<TranslationDraft> = {}): TranslationDraft {
+  const contentMarkdown =
+    overrides.content?.format === "markdown" ? overrides.content.markdown : (overrides.contentMarkdown ?? "");
+  return {
+    title: "",
+    summary: "",
+    content: { format: "markdown", markdown: contentMarkdown },
+    contentMarkdown,
+    ...overrides
+  };
+}
+
+function createTiptapDraft(overrides: Partial<TranslationDraft> = {}): TranslationDraft {
+  const content =
+    overrides.content?.format === "tiptap"
+      ? overrides.content
+      : {
+          format: "tiptap" as const,
+          schemaVersion: ARTICLE_DOCUMENT_SCHEMA_VERSION,
+          doc: emptyArticleDocument()
+        };
+  return {
+    title: "",
+    summary: "",
+    content,
+    contentMarkdown: overrides.contentMarkdown ?? projectArticleToMarkdown(content.doc),
+    ...overrides
+  };
+}
+
+function cloneTranslations(): TranslationDrafts {
+  return {
+    zh: createMarkdownDraft(),
+    en: createMarkdownDraft()
   };
 }
 
@@ -72,20 +132,35 @@ function buildInput(
   publishedAt: string | null,
   categorySlug: string,
   tagSlugs: string[],
-  translations: TranslationDraft
+  translations: TranslationDrafts,
+  expectedUpdatedAt: string | null
 ): UpsertPostInput {
   const nextTranslations = (["zh", "en"] as const)
-    .map((translationLocale) => ({
-      locale: translationLocale,
-      title: translations[translationLocale].title.trim(),
-      summary: translations[translationLocale].summary.trim(),
-      contentMarkdown: translations[translationLocale].contentMarkdown,
-      seoTitle: null,
-      seoDescription: null
-    }))
-    .filter((translation) => translation.title || translation.contentMarkdown);
+    .map((translationLocale) => {
+      const translation = translations[translationLocale];
+      const content =
+        translation.content.format === "markdown"
+          ? { format: "markdown" as const, markdown: translation.contentMarkdown }
+          : translation.content;
+      return {
+        locale: translationLocale,
+        title: translation.title.trim(),
+        summary: translation.summary.trim(),
+        content,
+        contentMarkdown: content.format === "markdown" ? content.markdown : "",
+        seoTitle: null,
+        seoDescription: null
+      };
+    })
+    .filter((translation) => hasTranslationContent(translations[translation.locale]));
 
-  return {
+  const fallbackTranslation = translations.zh;
+  const fallbackContent =
+    fallbackTranslation.content.format === "markdown"
+      ? { format: "markdown" as const, markdown: fallbackTranslation.contentMarkdown }
+      : fallbackTranslation.content;
+
+  const input: UpsertPostInput = {
     slug: slug.trim(),
     status,
     publishedAt: status === "draft" ? null : publishedAt ?? new Date().toISOString(),
@@ -94,8 +169,24 @@ function buildInput(
     translations:
       nextTranslations.length > 0
         ? nextTranslations
-        : [{ ...translations.zh, locale: "zh", seoTitle: null, seoDescription: null }]
+        : [
+            {
+              locale: "zh",
+              title: fallbackTranslation.title.trim(),
+              summary: fallbackTranslation.summary.trim(),
+              content: fallbackContent,
+              contentMarkdown: fallbackContent.format === "markdown" ? fallbackContent.markdown : "",
+              seoTitle: null,
+              seoDescription: null
+            }
+          ]
   };
+
+  if (expectedUpdatedAt) {
+    input.expectedUpdatedAt = expectedUpdatedAt;
+  }
+
+  return input;
 }
 
 function normalizeSlug(value: string): string {
@@ -200,8 +291,15 @@ function actionNoticeDetail(action: NonNullable<SaveAction>, tone: ActionNotice[
   return details[action][uiLocale];
 }
 
-function hasTranslationContent(translation: TranslationDraft[Locale]): boolean {
-  return Boolean(translation.title.trim() || translation.summary.trim() || translation.contentMarkdown.trim());
+function translationBodyText(translation: TranslationDraft): string {
+  if (translation.content.format === "tiptap") {
+    return extractArticleProse(translation.content.doc);
+  }
+  return translation.contentMarkdown;
+}
+
+function hasTranslationContent(translation: TranslationDraft): boolean {
+  return Boolean(translation.title.trim() || translation.summary.trim() || translationBodyText(translation).trim());
 }
 
 function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | null {
@@ -228,13 +326,13 @@ function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | n
   return null;
 }
 
-function getAutoSlugSeed(translations: TranslationDraft, activeLocale: Locale): string {
+function getAutoSlugSeed(translations: TranslationDrafts, activeLocale: Locale): string {
   const locales: Locale[] = [activeLocale, otherLocale(activeLocale)];
-  const fields: Array<keyof TranslationDraft[Locale]> = ["title", "summary", "contentMarkdown"];
 
-  for (const field of fields) {
-    for (const translationLocale of locales) {
-      const slug = normalizeSlug(translations[translationLocale][field]);
+  for (const translationLocale of locales) {
+    const translation = translations[translationLocale];
+    for (const value of [translation.title, translation.summary, translationBodyText(translation)]) {
+      const slug = normalizeSlug(value);
       if (slug) {
         return slug;
       }
@@ -267,7 +365,7 @@ function findDuplicateSlugPost(
 
 function resolvePostSlug(
   input: UpsertPostInput,
-  translations: TranslationDraft,
+  translations: TranslationDrafts,
   activeLocale: Locale,
   posts: Array<{ id: number; slug: string }>,
   currentPostId: number | undefined,
@@ -299,11 +397,82 @@ function resolvePostSlug(
 }
 
 function localizeSaveError(message: string, uiLocale: Locale): string {
+  if (message === "Post was updated elsewhere") {
+    return uiLocale === "zh"
+      ? "文章已被其他位置更新，请重新加载后再继续。"
+      : "This post was updated elsewhere. Reload before continuing.";
+  }
+
   if (message === "Post slug already exists") {
     return uiLocale === "zh" ? "Slug 已被其他文章使用。请换一个。" : "Slug is already used by another post.";
   }
 
   return message;
+}
+
+function translationDraftFromPost(translation: PostTranslation): TranslationDraft {
+  const content = translation.content ?? { format: "markdown" as const, markdown: translation.contentMarkdown };
+  if (content.format === "tiptap") {
+    const doc = validateArticleDocument(content.doc);
+    return createTiptapDraft({
+      title: translation.title,
+      summary: translation.summary,
+      content: { ...content, doc },
+      contentMarkdown: translation.contentMarkdown
+    });
+  }
+
+  return createMarkdownDraft({
+    title: translation.title,
+    summary: translation.summary,
+    content: { format: "markdown", markdown: translation.contentMarkdown },
+    contentMarkdown: translation.contentMarkdown
+  });
+}
+
+function draftStateFromPost(post: PublicPost): {
+  translations: TranslationDrafts;
+  editorErrors: Partial<Record<Locale, string>>;
+} {
+  const translations = cloneTranslations();
+  const editorErrors: Partial<Record<Locale, string>> = {};
+
+  for (const translation of post.translations) {
+    try {
+      translations[translation.locale] = translationDraftFromPost(translation);
+    } catch {
+      translations[translation.locale] = createTiptapDraft({
+        title: translation.title,
+        summary: translation.summary,
+        contentMarkdown: translation.contentMarkdown
+      });
+      editorErrors[translation.locale] = "Stored article JSON could not be loaded.";
+    }
+  }
+
+  return { translations, editorErrors };
+}
+
+function serializeEditorState(input: {
+  slug: string;
+  status: PostStatus;
+  publishedAt: string | null;
+  categorySlug: string;
+  selectedTagSlugs: string[];
+  translations: TranslationDrafts;
+}): string {
+  return JSON.stringify({
+    slug: input.slug.trim(),
+    status: input.status,
+    publishedAt: input.publishedAt,
+    categorySlug: input.categorySlug,
+    selectedTagSlugs: [...input.selectedTagSlugs].sort(),
+    translations: input.translations
+  });
+}
+
+function draftHasTiptapContent(translations: TranslationDrafts): boolean {
+  return Object.values(translations).some((translation) => translation.content.format === "tiptap" && hasTranslationContent(translation));
 }
 
 function markdownModeLabel(mode: MarkdownEditorMode, uiLocale: Locale): string {
@@ -400,13 +569,27 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [quickTagSlugTouched, setQuickTagSlugTouched] = useState(false);
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [tagSelectorError, setTagSelectorError] = useState<string | null>(null);
-  const [translations, setTranslations] = useState<TranslationDraft>(cloneTranslations);
+  const [translations, setTranslations] = useState<TranslationDrafts>(cloneTranslations);
+  const [postUpdatedAt, setPostUpdatedAt] = useState<string | null>(null);
+  const [isDraftBaselineReady, setIsDraftBaselineReady] = useState(!postId);
+  const [savedBaseline, setSavedBaseline] = useState(() =>
+    serializeEditorState({
+      slug: "",
+      status: "draft",
+      publishedAt: null,
+      categorySlug: "",
+      selectedTagSlugs: [],
+      translations: cloneTranslations()
+    })
+  );
   const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("split");
   const [isFocusMode, setIsFocusMode] = useState(false);
   const [markdownSearch, setMarkdownSearch] = useState<MarkdownSearchState>(EMPTY_SEARCH_STATE);
+  const [tiptapEditorErrors, setTiptapEditorErrors] = useState<Partial<Record<Locale, string>>>({});
   const [isLoading, setIsLoading] = useState(Boolean(postId));
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [articleImageNotice, setArticleImageNotice] = useState<string | null>(null);
   const [saveAction, setSaveAction] = useState<SaveAction>(null);
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -415,6 +598,39 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [pendingTranslationTarget, setPendingTranslationTarget] = useState<Locale | null>(null);
   const [translationWarnings, setTranslationWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const articleImageUploadController = useArticleImageUpload({
+    postUid,
+    upload: uploadAdminPostImage,
+    onNotice: setArticleImageNotice
+  });
+
+  function applyPostState(post: PublicPost) {
+    const { translations: nextTranslations, editorErrors } = draftStateFromPost(post);
+    const nextCategorySlug = post.category?.slug ?? "";
+    const nextSelectedTagSlugs = post.tags.map((tag) => tag.slug);
+
+    setSlug(post.slug);
+    setPostUid(post.uid);
+    setPostUpdatedAt(post.updatedAt);
+    setStatus(post.status);
+    setPublishedAt(post.publishedAt);
+    setCategorySlug(nextCategorySlug);
+    setSelectedTagSlugs(nextSelectedTagSlugs);
+    setTags((currentTags) => mergeTags(currentTags, post.tags));
+    setTranslations(nextTranslations);
+    setTiptapEditorErrors(editorErrors);
+    setSavedBaseline(
+      serializeEditorState({
+        slug: post.slug,
+        status: post.status,
+        publishedAt: post.publishedAt,
+        categorySlug: nextCategorySlug,
+        selectedTagSlugs: nextSelectedTagSlugs,
+        translations: nextTranslations
+      })
+    );
+    setIsDraftBaselineReady(true);
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -447,7 +663,23 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
   useEffect(() => {
     if (!postId) {
+      const nextTranslations = cloneTranslations();
+      setIsDraftBaselineReady(false);
       setPostUid(null);
+      setPostUpdatedAt(null);
+      setTranslations(nextTranslations);
+      setTiptapEditorErrors({});
+      setSavedBaseline(
+        serializeEditorState({
+          slug: "",
+          status: "draft",
+          publishedAt: null,
+          categorySlug: "",
+          selectedTagSlugs: [],
+          translations: nextTranslations
+        })
+      );
+      setIsDraftBaselineReady(true);
       return;
     }
 
@@ -457,6 +689,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
     async function loadPost() {
       setIsLoading(true);
+      setIsDraftBaselineReady(false);
       setError(null);
 
       try {
@@ -465,23 +698,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           return;
         }
 
-        const nextTranslations = cloneTranslations();
-        for (const translation of post.translations) {
-          nextTranslations[translation.locale] = {
-            title: translation.title,
-            summary: translation.summary,
-            contentMarkdown: translation.contentMarkdown
-          };
-        }
-
-        setSlug(post.slug);
-        setPostUid(post.uid);
-        setStatus(post.status);
-        setPublishedAt(post.publishedAt);
-        setCategorySlug(post.category?.slug ?? "");
-        setSelectedTagSlugs(post.tags.map((tag) => tag.slug));
-        setTags((currentTags) => mergeTags(currentTags, post.tags));
-        setTranslations(nextTranslations);
+        applyPostState(post);
       } catch (caught) {
         if (isMounted && !controller.signal.aborted) {
           setError(caught instanceof Error ? caught.message : "Failed to load post");
@@ -501,13 +718,55 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     };
   }, [postId]);
 
-  function updateTranslation(field: keyof TranslationDraft[Locale], value: string) {
+  function updateTranslation(field: "title" | "summary" | "contentMarkdown", value: string) {
+    setTranslations((current) => {
+      const currentTranslation = current[activeLocale];
+      const nextTranslation =
+        field === "contentMarkdown"
+          ? createMarkdownDraft({
+              ...currentTranslation,
+              content: { format: "markdown", markdown: value },
+              contentMarkdown: value
+            })
+          : {
+              ...currentTranslation,
+              [field]: value
+            };
+
+      return {
+        ...current,
+        [activeLocale]: nextTranslation
+      };
+    });
+  }
+
+  function updateActiveArticleDocument(doc: ArticleDocument) {
     setTranslations((current) => ({
       ...current,
-      [activeLocale]: {
+      [activeLocale]: createTiptapDraft({
         ...current[activeLocale],
-        [field]: value
-      }
+        content: {
+          format: "tiptap",
+          schemaVersion: ARTICLE_DOCUMENT_SCHEMA_VERSION,
+          doc
+        },
+        contentMarkdown: projectArticleToMarkdown(doc)
+      })
+    }));
+    setTiptapEditorErrors((current) => ({ ...current, [activeLocale]: undefined }));
+  }
+
+  function chooseActiveLocaleFormat(format: "markdown" | "tiptap") {
+    if (format === "markdown") {
+      return;
+    }
+
+    setTranslations((current) => ({
+      ...current,
+      [activeLocale]: createTiptapDraft({
+        title: current[activeLocale].title,
+        summary: current[activeLocale].summary
+      })
     }));
   }
 
@@ -615,6 +874,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         ...current,
         [activeLocale]: {
           ...current[activeLocale],
+          content: { format: "markdown", markdown: nextMarkdown },
           contentMarkdown: nextMarkdown
         }
       };
@@ -805,6 +1065,36 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   async function savePost(nextStatus: PostStatus, action: NonNullable<SaveAction>) {
     setError(null);
     setTranslationWarnings([]);
+
+    const invalidLocale = (["zh", "en"] as const).find((translationLocale) => tiptapEditorErrors[translationLocale]);
+    if (invalidLocale) {
+      const message =
+        locale === "zh"
+          ? "当前文章包含无法加载的富文本正文，请重新加载或恢复后再保存。"
+          : "This post contains rich text content that could not be loaded. Reload or restore it before saving.";
+      setActionNotice({
+        tone: "error",
+        title: actionFailureTitle(action, locale),
+        detail: message
+      });
+      setError(message);
+      return;
+    }
+
+    if (nextStatus === "published" && draftHasTiptapContent(translations) && !isTiptapPublishEnabled()) {
+      const message =
+        locale === "zh"
+          ? "富文本文章发布开关尚未开启；可以先保存草稿。"
+          : "TipTap publishing is not enabled yet. Save this as a draft for now.";
+      setActionNotice({
+        tone: "error",
+        title: actionFailureTitle(action, locale),
+        detail: message
+      });
+      setError(message);
+      return;
+    }
+
     setSaveAction(action);
     setActionNotice({
       tone: "pending",
@@ -813,7 +1103,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     });
 
     try {
-      const input = buildInput(slug, nextStatus, publishedAt, categorySlug, selectedTagSlugs, translations);
+      const input = buildInput(slug, nextStatus, publishedAt, categorySlug, selectedTagSlugs, translations, postId ? postUpdatedAt : null);
       const { posts } = await fetchAdminPosts();
       const resolved = resolvePostSlug(input, translations, activeLocale, posts, postId, locale);
       const validationMessage = resolved.error ?? validatePostInput(resolved.input, locale);
@@ -833,9 +1123,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       }
 
       const { post } = postId ? await updateAdminPost(postId, resolved.input) : await createAdminPost(resolved.input);
-      setPostUid(post.uid);
-      setStatus(post.status);
-      setPublishedAt(post.publishedAt);
+      applyPostState(post);
       setActionNotice({
         tone: "success",
         title: actionSuccessTitle(action, locale),
@@ -896,11 +1184,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
       setTranslations((current) => ({
         ...current,
-        [targetLocale]: {
+        [targetLocale]: createMarkdownDraft({
           title: translation.title,
           summary: translation.summary,
           contentMarkdown: translation.contentMarkdown
-        }
+        })
       }));
       setActiveLocale(targetLocale);
       setTranslationWarnings(warnings);
@@ -937,6 +1225,9 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   const currentTranslation = translations[activeLocale];
+  const isActiveTiptap = currentTranslation.content.format === "tiptap";
+  const activeTiptapError = tiptapEditorErrors[activeLocale];
+  const currentArticleDocument = currentTranslation.content.format === "tiptap" ? currentTranslation.content.doc : null;
   const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
   const editorStats = useMemo(() => {
@@ -960,6 +1251,40 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const activeSearchIndex = markdownSearchMatches.length > 0 ? Math.min(markdownSearch.currentIndex, markdownSearchMatches.length - 1) : -1;
   const targetLocale = otherLocale(activeLocale);
   const isBusy = Boolean(saveAction) || isDeleting || isTranslating;
+  const currentBaseline = useMemo(
+    () =>
+      serializeEditorState({
+        slug,
+        status,
+        publishedAt,
+        categorySlug,
+        selectedTagSlugs,
+        translations
+      }),
+    [categorySlug, publishedAt, selectedTagSlugs, slug, status, translations]
+  );
+  const isDirty = isDraftBaselineReady && currentBaseline !== savedBaseline;
+  useUnsavedArticleWarning(isDirty);
+  const isNewArticleTiptapEnabled = isTiptapNewArticleEnabled();
+  const isTiptapPublishGateEnabled = isTiptapPublishEnabled();
+  const hasTiptapDraft = draftHasTiptapContent(translations);
+  const hasTiptapEditorError = (["zh", "en"] as const).some((translationLocale) => tiptapEditorErrors[translationLocale]);
+  const canChooseNewArticleFormat =
+    !postId &&
+    isNewArticleTiptapEnabled &&
+    !Object.values(translations).some(hasTranslationContent);
+  const tiptapPublishDisabled = hasTiptapDraft && !isTiptapPublishGateEnabled;
+  const publishDisabledTitle = tiptapPublishDisabled
+    ? locale === "zh"
+      ? "富文本文章发布开关尚未开启；请先保存草稿。"
+      : "TipTap publishing is not enabled yet. Save a draft first."
+    : undefined;
+  const translationDisabledTitle =
+    isActiveTiptap
+      ? locale === "zh"
+        ? "富文本 AI 翻译将在结构保持管线完成后开放。"
+        : "TipTap AI translation will be enabled after the structure-preserving pipeline ships."
+      : undefined;
   const canPreview = Boolean(postId && slug.trim() && status !== "draft");
   const selectedTags = useMemo(
     () =>
@@ -1002,24 +1327,42 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           <div className="editor-actions" aria-label={locale === "zh" ? "文章操作" : "Post actions"}>
             {status === "draft" ? (
               <>
-                <button className="secondary-button" type="button" disabled={isBusy} onClick={() => void savePost("draft", "draft")}>
+                <button className="secondary-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("draft", "draft")}>
                   {saveAction === "draft" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存草稿" : "Save draft"}
                 </button>
-                <button className="primary-button" type="button" disabled={isBusy} onClick={() => void savePost("published", "publish")}>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={isBusy || hasTiptapEditorError || tiptapPublishDisabled}
+                  title={publishDisabledTitle}
+                  onClick={() => void savePost("published", "publish")}
+                >
                   {saveAction === "publish" ? (locale === "zh" ? "发布中..." : "Publishing...") : locale === "zh" ? "发布" : "Publish"}
                 </button>
               </>
             ) : (
               <>
-                <button className="secondary-button" type="button" disabled={isBusy} onClick={() => void savePost(status, "save")}>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isBusy || hasTiptapEditorError || (status === "published" && tiptapPublishDisabled)}
+                  title={status === "published" ? publishDisabledTitle : undefined}
+                  onClick={() => void savePost(status, "save")}
+                >
                   {saveAction === "save" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存修改" : "Save changes"}
                 </button>
                 {status === "published" ? (
-                  <button className="danger-button" type="button" disabled={isBusy} onClick={() => void savePost("hidden", "hide")}>
+                  <button className="danger-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("hidden", "hide")}>
                     {saveAction === "hide" ? (locale === "zh" ? "下架中..." : "Hiding...") : locale === "zh" ? "隐藏/下架" : "Hide"}
                   </button>
                 ) : (
-                  <button className="primary-button" type="button" disabled={isBusy} onClick={() => void savePost("published", "republish")}>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={isBusy || hasTiptapEditorError || tiptapPublishDisabled}
+                    title={publishDisabledTitle}
+                    onClick={() => void savePost("published", "republish")}
+                  >
                     {saveAction === "republish" ? (locale === "zh" ? "重新发布中..." : "Republishing...") : locale === "zh" ? "重新发布/显示" : "Republish"}
                   </button>
                 )}
@@ -1058,7 +1401,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           </div>
         ) : null}
 
-        <div className={`editor-grid editor-grid--${editorMode}`}>
+        <div className={`editor-grid editor-grid--${isActiveTiptap ? "split" : editorMode}`}>
           <div className="editor-fields">
             <div className="editor-card">
               <div className="editor-card__heading">
@@ -1212,7 +1555,13 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                       </button>
                     ))}
                   </div>
-                  <button className="secondary-button" type="button" disabled={isBusy} onClick={requestTranslation}>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || isActiveTiptap}
+                    title={translationDisabledTitle}
+                    onClick={requestTranslation}
+                  >
                     {isTranslating
                       ? locale === "zh"
                         ? "翻译中..."
@@ -1258,41 +1607,52 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 <span>{locale === "zh" ? "摘要" : "Summary"}</span>
                 <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
               </label>
-              <div className="markdown-mode-row" role="tablist" aria-label="Markdown editor mode">
-                {MARKDOWN_EDITOR_MODES.map((mode) => (
-                  <button
-                    type="button"
-                    key={mode}
-                    className={editorMode === mode ? "is-active" : undefined}
-                    aria-pressed={editorMode === mode}
-                    onClick={() => changeEditorMode(mode)}
-                  >
-                    {markdownModeLabel(mode, locale)}
-                  </button>
-                ))}
-              </div>
-              <div className="markdown-outline-panel" aria-label={locale === "zh" ? "Markdown 大纲" : "Markdown outline"}>
-                <div className="markdown-outline-panel__heading">
-                  <span>{locale === "zh" ? "标题大纲" : "Outline"}</span>
-                  <strong>{markdownHeadings.length}</strong>
-                </div>
-                {markdownHeadings.length > 0 ? (
-                  <ol className="markdown-outline-list">
-                    {markdownHeadings.map((heading) => (
-                      <li key={heading.id} className={`heading-level-${heading.level}`}>
-                        <button type="button" onClick={() => jumpToMarkdownOffset(heading.lineStart)}>
-                          {heading.text}
-                        </button>
-                      </li>
+              {canChooseNewArticleFormat ? (
+                <ArticleFormatActions
+                  locale={locale}
+                  currentFormat={currentTranslation.content.format}
+                  onChooseFormat={chooseActiveLocaleFormat}
+                />
+              ) : null}
+              {!isActiveTiptap ? (
+                <>
+                  <div className="markdown-mode-row" role="tablist" aria-label="Markdown editor mode">
+                    {MARKDOWN_EDITOR_MODES.map((mode) => (
+                      <button
+                        type="button"
+                        key={mode}
+                        className={editorMode === mode ? "is-active" : undefined}
+                        aria-pressed={editorMode === mode}
+                        onClick={() => changeEditorMode(mode)}
+                      >
+                        {markdownModeLabel(mode, locale)}
+                      </button>
                     ))}
-                  </ol>
-                ) : (
-                  <p className="field-hint">
-                    {locale === "zh" ? "添加 # 标题后会生成大纲。" : "Add # headings to build an outline."}
-                  </p>
-                )}
-              </div>
-              {editorMode !== "preview" ? (
+                  </div>
+                  <div className="markdown-outline-panel" aria-label={locale === "zh" ? "Markdown 大纲" : "Markdown outline"}>
+                    <div className="markdown-outline-panel__heading">
+                      <span>{locale === "zh" ? "标题大纲" : "Outline"}</span>
+                      <strong>{markdownHeadings.length}</strong>
+                    </div>
+                    {markdownHeadings.length > 0 ? (
+                      <ol className="markdown-outline-list">
+                        {markdownHeadings.map((heading) => (
+                          <li key={heading.id} className={`heading-level-${heading.level}`}>
+                            <button type="button" onClick={() => jumpToMarkdownOffset(heading.lineStart)}>
+                              {heading.text}
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="field-hint">
+                        {locale === "zh" ? "添加 # 标题后会生成大纲。" : "Add # headings to build an outline."}
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : null}
+              {!isActiveTiptap && editorMode !== "preview" ? (
                 <div className="editor-field editor-field--markdown-source">
                 <div className="markdown-control-row">
                   <span>Markdown body</span>
@@ -1386,6 +1746,35 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 />
                 </div>
               ) : null}
+              {isActiveTiptap ? (
+                activeTiptapError || !currentArticleDocument ? (
+                  <div className="article-editor-recovery" role="alert">
+                    <strong>{locale === "zh" ? "富文本正文无法加载" : "Rich text body could not be loaded"}</strong>
+                    <p>
+                      {locale === "zh"
+                        ? "为避免覆盖原文，当前语言暂时只能查看兼容预览，请重新加载或恢复内容后再保存。"
+                        : "To avoid overwriting the original article, this locale is read-only until you reload or restore the content."}
+                    </p>
+                    <MarkdownPreview markdown={currentTranslation.contentMarkdown} locale={locale} />
+                  </div>
+                ) : (
+                  <ArticleEditor
+                    key={activeLocale}
+                    value={currentArticleDocument}
+                    locale={activeLocale}
+                    onChange={updateActiveArticleDocument}
+                    onInvalidContent={(caught) =>
+                      setTiptapEditorErrors((current) => ({
+                        ...current,
+                        [activeLocale]: caught instanceof Error ? caught.message : "Invalid article content"
+                      }))
+                    }
+                    imageUploadController={articleImageUploadController}
+                    imageUploadNotice={articleImageNotice}
+                    readOnly={isBusy}
+                  />
+                )
+              ) : null}
 
               {translationWarnings.length > 0 ? (
                 <p className="warning-text">
@@ -1396,13 +1785,20 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
             </div>
           </div>
 
-          {editorMode !== "source" ? (
-            <aside ref={previewPaneRef} id="editor-preview" className={`preview-pane preview-pane--${editorMode}`} tabIndex={-1}>
+          {isActiveTiptap || editorMode !== "source" ? (
+            <aside ref={previewPaneRef} id="editor-preview" className={`preview-pane preview-pane--${isActiveTiptap ? "split" : editorMode}`} tabIndex={-1}>
             <div className="preview-pane__heading">
               <span>{locale === "zh" ? "预览" : "Preview"}</span>
               <strong>{languageLabel(activeLocale, locale)}</strong>
             </div>
-            <MarkdownPreview markdown={deferredMarkdown} locale={locale} />
+            <MarkdownPreview
+              translation={{
+                locale: activeLocale,
+                content: currentTranslation.content,
+                contentMarkdown: isActiveTiptap ? currentTranslation.contentMarkdown : deferredMarkdown
+              }}
+              locale={locale}
+            />
             </aside>
           ) : null}
         </div>

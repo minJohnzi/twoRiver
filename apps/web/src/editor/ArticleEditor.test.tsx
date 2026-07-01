@@ -161,6 +161,43 @@ describe("ArticleEditor", () => {
     expect(screen.queryByRole("textbox", { name: "Article body" })).not.toBeInTheDocument();
     expect(handleInvalid).toHaveBeenCalled();
   });
+
+  it("routes toolbar image selections through the upload controller", async () => {
+    const chooseFile = vi.fn().mockResolvedValue(undefined);
+    const controller = {
+      isUploading: false,
+      chooseFile,
+      onPasteFiles: vi.fn(),
+      onDropFiles: vi.fn()
+    };
+    const { container } = render(
+      <ArticleEditor
+        value={paragraphDocument}
+        locale="en"
+        onChange={vi.fn()}
+        imageUploadController={controller}
+        imageUploadNotice="Uploading image..."
+      />
+    );
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("Initial body");
+    expect(screen.getByRole("status")).toHaveTextContent("Uploading image...");
+
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    const input = fileInput as HTMLInputElement;
+    expect(input).toHaveAttribute("accept", "image/jpeg,image/png,image/webp,image/gif");
+
+    const clickFileInput = vi.spyOn(input, "click");
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+    expect(clickFileInput).toHaveBeenCalled();
+
+    const file = new File(["image"], "diagram.png", { type: "image/png" });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(chooseFile).toHaveBeenCalledWith(file, expect.objectContaining({ position: expect.any(Number) })));
+    expect(chooseFile.mock.calls[0]?.[1].editor).toBeTruthy();
+  });
 });
 
 describe("ArticleEditorToolbarView", () => {
@@ -234,6 +271,16 @@ describe("ArticleEditorToolbarView", () => {
     expect(screen.getByRole("button", { name: "Add row" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
     expect(screen.getByLabelText("Code block language")).toBeDisabled();
+  });
+
+  it("disables the image control while an upload is already running", () => {
+    const actions = toolbarActions();
+    render(<ArticleEditorToolbarView locale="en" state={toolbarState()} actions={actions} isImageUploading />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Insert image" }));
+
+    expect(screen.getByRole("button", { name: "Insert image" })).toBeDisabled();
+    expect(actions.calls).toEqual([]);
   });
 
   it("shows an accessible link popover with removal action", () => {
