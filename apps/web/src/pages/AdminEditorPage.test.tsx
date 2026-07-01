@@ -729,7 +729,7 @@ describe("admin editor image uploads", () => {
     const dialog = await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" });
     expect(mockedPreviewAdminPostTiptapConversion).toHaveBeenCalledWith(1, "en");
     expect(within(dialog).getByText("Line 1: Markdown spacing will be normalized.")).toBeInTheDocument();
-    expect(within(dialog).getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+    expect(await within(dialog).findByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Convert to rich text" }));
 
@@ -740,6 +740,35 @@ describe("admin editor image uploads", () => {
     );
     expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+  });
+
+  it("localizes the conversion preview dialog and restores focus after keyboard dismissal", async () => {
+    mockedPreviewAdminPostTiptapConversion.mockResolvedValue({
+      originalMarkdown: "你好，世界",
+      document: tiptapDocument,
+      projectedMarkdown: "# 预览标题\n\nTipTap body\n",
+      canConvert: true,
+      blockers: [],
+      warnings: []
+    });
+
+    renderEditor("/admin/posts/1", "zh");
+
+    await loadedMarkdownTextarea();
+    const previewButton = screen.getByRole("button", { name: "预检 TipTap 转换" });
+    previewButton.focus();
+    fireEvent.click(previewButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "将 Markdown 转换为富文本？" });
+    const cancelButton = within(dialog).getByRole("button", { name: "取消" });
+    expect(within(dialog).getByText("未发现阻断项。")).toBeInTheDocument();
+    expect(within(dialog).getByText("未发现注意项。")).toBeInTheDocument();
+    await waitFor(() => expect(cancelButton).toHaveFocus());
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "将 Markdown 转换为富文本？" })).not.toBeInTheDocument());
+    await waitFor(() => expect(previewButton).toHaveFocus());
   });
 
   it("ignores a conversion preview response after navigating to another article", async () => {
@@ -1122,6 +1151,52 @@ describe("admin editor image uploads", () => {
     await waitFor(() => expect(restoreButton).toBeDisabled());
     fireEvent.click(restoreButton);
     expect(mockedRestoreAdminPostTranslationMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("traps focus inside the restore dialog and returns focus to the trigger", async () => {
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makeTiptapPost({
+        translations: [
+          {
+            locale: "en",
+            title: "TipTap Draft",
+            summary: "",
+            contentMarkdown: "TipTap body\n",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: tiptapDocument
+            },
+            canRestoreMarkdown: true,
+            restoreMarkdownSnapshotAt: "2026-06-09T00:00:00.000Z",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    const restoreButton = screen.getByRole("button", { name: "Restore Markdown snapshot" });
+    restoreButton.focus();
+    fireEvent.click(restoreButton);
+
+    const dialog = await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" });
+    const cancelButton = within(dialog).getByRole("button", { name: "Cancel" });
+    const confirmButton = within(dialog).getByRole("button", { name: "Restore Markdown" });
+    await waitFor(() => expect(cancelButton).toHaveFocus());
+
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(confirmButton).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Restore Markdown snapshot?" })).not.toBeInTheDocument());
+    await waitFor(() => expect(restoreButton).toHaveFocus());
   });
 
   it("locks the form during restore and ignores the old restore response after navigation", async () => {

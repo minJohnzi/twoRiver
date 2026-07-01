@@ -2255,6 +2255,19 @@ button:focus-visible {
   font-size: 13px;
 }
 
+.editor-loading-state {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  border: 1px dashed var(--color-border);
+  background: var(--color-admin-panel);
+  color: var(--color-muted);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 20px;
+  text-align: center;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2273,6 +2286,11 @@ button:focus-visible {
   background: var(--color-admin-panel-strong);
   box-shadow: 0 28px 90px var(--color-shadow);
   padding: 22px;
+}
+
+.confirm-dialog:focus {
+  outline: 2px solid var(--color-admin-accent);
+  outline-offset: 2px;
 }
 
 .confirm-dialog h2 {

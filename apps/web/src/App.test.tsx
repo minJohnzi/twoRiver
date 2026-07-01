@@ -250,7 +250,7 @@ describe("admin route protection", () => {
 
     fireEvent.click(await screen.findByRole("link", { name: "分类管理" }));
 
-    await screen.findByRole("heading", { name: "分类管理" });
+    await screen.findByRole("heading", { name: "分类管理" }, { timeout: 5_000 });
     expect(mockedFetchCurrentUser).toHaveBeenCalledTimes(1);
   });
 

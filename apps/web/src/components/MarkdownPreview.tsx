@@ -16,7 +16,7 @@ type MarkdownPreviewSource =
       translation: Pick<PostTranslation, "locale" | "content" | "contentMarkdown">;
     };
 
-type MarkdownPreviewProps = MarkdownPreviewSource & {
+export type MarkdownPreviewProps = MarkdownPreviewSource & {
   locale?: Locale;
   postId?: number;
   slug?: string;

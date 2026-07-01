@@ -19,9 +19,13 @@ import type {
 } from "@tworiver/shared";
 import {
   type ClipboardEvent,
+  type ComponentType,
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
+  type MouseEvent,
+  Suspense,
+  lazy,
   useDeferredValue,
   useEffect,
   useMemo,
@@ -44,8 +48,8 @@ import {
   updateAdminPost,
   uploadAdminPostImage
 } from "../api/admin";
-import { MarkdownPreview } from "../components/MarkdownPreview";
-import { ArticleEditor } from "../editor/ArticleEditor";
+import type { MarkdownPreviewProps } from "../components/MarkdownPreview";
+import type { ArticleEditorProps } from "../editor/ArticleEditor";
 import { ArticleFormatActions } from "../editor/ArticleFormatActions";
 import { useArticleImageUpload } from "../editor/useArticleImageUpload";
 import { useUnsavedArticleWarning } from "../editor/useUnsavedArticleWarning";
@@ -73,6 +77,7 @@ type ConversionAction = "preview" | "convert" | "restore" | null;
 type ConversionContext = { postId: number; expectedUpdatedAt: string; locale: Locale; editorBaseline: string };
 type ConversionPreviewState = (ConversionContext & { preview: MarkdownConversionPreview }) | null;
 type RestoreMarkdownState = (ConversionContext & { snapshotAt: string | null }) | null;
+type ActiveFormatDialog = "conversion-preview" | "restore-markdown" | null;
 
 interface MarkdownHeading {
   id: string;
@@ -93,6 +98,184 @@ const DEFAULT_IMAGE_ALT = "图片";
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const EMPTY_SEARCH_STATE: MarkdownSearchState = { isOpen: false, query: "", currentIndex: 0 };
 const MARKDOWN_EDITOR_MODES: MarkdownEditorMode[] = ["source", "split", "preview"];
+const DIALOG_FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "a[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(", ");
+
+function createModuleLoader<TModule extends object>(loader: () => Promise<TModule>) {
+  let modulePromise: Promise<TModule> | null = null;
+  return () => {
+    modulePromise ??= loader().catch((error: unknown) => {
+      modulePromise = null;
+      throw error;
+    });
+    return modulePromise;
+  };
+}
+
+function lazyNamed<TProps>(loader: () => Promise<object>, name: string) {
+  return lazy(async () => {
+    const module = (await loader()) as Record<string, ComponentType<TProps>>;
+    const component = module[name];
+    if (!component) {
+      throw new Error(`Editor module is missing export "${name}".`);
+    }
+
+    return { default: component };
+  });
+}
+
+const loadMarkdownPreviewModule = createModuleLoader(() => import("../components/MarkdownPreview"));
+const loadArticleEditorModule = createModuleLoader(() => import("../editor/ArticleEditor"));
+const LazyMarkdownPreview = lazyNamed<MarkdownPreviewProps>(loadMarkdownPreviewModule, "MarkdownPreview");
+const LazyArticleEditor = lazyNamed<ArticleEditorProps>(loadArticleEditorModule, "ArticleEditor");
+
+function EditorSurfaceFallback({ message }: { message: string }) {
+  return (
+    <div className="editor-loading-state" role="status" aria-live="polite">
+      {message}
+    </div>
+  );
+}
+
+function getFormatUiCopy(uiLocale: Locale) {
+  if (uiLocale === "zh") {
+    return {
+      linePrefix: "第",
+      lineSuffix: "行",
+      dirtyMessage: "切换正文格式前，请先保存当前改动或重新加载。",
+      dependencyPendingMessage: "请等待图片上传和标签创建完成后，再切换正文格式。",
+      changedBaselineMessage: "格式请求执行期间，本地编辑内容已变化。当前改动已保留；请重新加载后再试。",
+      unavailableTitle: "暂时无法切换格式",
+      saveCurrentEditsTitle: "请先保存当前改动",
+      responseIgnoredTitle: "格式响应未应用",
+      saveBeforeChangingFormat: "请先保存这篇文章，再切换正文格式。",
+      previewPendingTitle: "正在预检富文本转换",
+      previewPendingDetail: "正在检查已保存的 Markdown 正文里是否包含当前版本不支持的结构。",
+      previewReadyTitle: "转换预检已完成",
+      previewBlockedTitle: "转换存在阻断项",
+      previewReadyDetail: "请先核对兼容 Markdown 投影，再确认格式切换。",
+      previewBlockedDetail: "请先处理下方阻断项，再转换当前语言版本。",
+      previewFailedTitle: "转换预检失败",
+      previewFailedFallback: "转换预检失败",
+      conversionBlockedTitle: "转换被阻止",
+      publishBlockedMessage: "TipTap 发布开关尚未开启；若当前语言已发布，请先下架再转换。",
+      convertingTitle: "正在转换为富文本",
+      convertingDetail: "服务端会基于最新已保存的 Markdown 重新计算转换结果。",
+      convertedTitle: "已转换为富文本",
+      convertedDetail: "当前语言已改为权威 TipTap JSON，并保留可恢复的 Markdown 快照。",
+      conversionFailedTitle: "转换失败",
+      conversionFailedFallback: "转换为富文本失败",
+      restoringTitle: "正在恢复 Markdown 快照",
+      restoringDetail: "已保存的 Markdown 快照将替换当前语言的 TipTap JSON。",
+      restoredTitle: "Markdown 已恢复",
+      restoredDetail: "当前语言已回到转换前保存的精确 Markdown 快照。",
+      restoreFailedTitle: "恢复失败",
+      restoreFailedFallback: "恢复 Markdown 失败",
+      panelHeading: "Markdown 存储正文",
+      panelDescription: "先预检已保存的 Markdown 将如何转换为 TipTap，再决定是否切换当前语言版本。",
+      previewButton: "预检 TipTap 转换",
+      previewingButton: "预检中...",
+      snapshotHeading: "可恢复的 Markdown 快照",
+      snapshotDescription: (snapshotAt: string | null) =>
+        `当前语言可恢复到转换前保存的原始 Markdown${snapshotAt ? `（快照时间：${snapshotAt}）` : ""}。`,
+      restoreButton: "恢复 Markdown 快照",
+      loadingPreview: "正在加载文章预览…",
+      loadingEditor: "正在加载富文本编辑器…",
+      conversionDialogTitle: "将 Markdown 转换为富文本？",
+      conversionDialogDescription: (language: string) =>
+        `本次预检基于已保存的${language} Markdown。确认后，服务端会按最新已保存内容重新计算转换结果。`,
+      blockersHeading: "阻断项",
+      warningsHeading: "注意项",
+      noBlockers: "未发现阻断项。",
+      noWarnings: "未发现注意项。",
+      projectedMarkdownHeading: "转换后的兼容 Markdown 投影",
+      cancel: "取消",
+      convertButton: "转换为富文本",
+      convertingButton: "转换中...",
+      restoreDialogTitle: "恢复 Markdown 快照？",
+      restoreDialogDescription: (language: string, snapshotAt: string | null) =>
+        `这会用转换前保存的原始 Markdown${snapshotAt ? `（快照时间：${snapshotAt}）` : ""}替换 ${language} 的 TipTap JSON。`,
+      restoreConfirmButton: "恢复 Markdown",
+      restoringButton: "恢复中..."
+    };
+  }
+
+  return {
+    linePrefix: "Line",
+    lineSuffix: "",
+    dirtyMessage: "Save or reload your current edits before changing the article format.",
+    dependencyPendingMessage: "Wait for image uploads and tag creation to finish before changing the article format.",
+    changedBaselineMessage: "Local edits changed while the format request was running. Your edits were kept; reload before retrying.",
+    unavailableTitle: "Format change unavailable",
+    saveCurrentEditsTitle: "Save current edits first",
+    responseIgnoredTitle: "Format response not applied",
+    saveBeforeChangingFormat: "Save this post before changing the article format.",
+    previewPendingTitle: "Previewing rich text conversion",
+    previewPendingDetail: "Checking the saved Markdown body for unsupported structures.",
+    previewReadyTitle: "Conversion preview ready",
+    previewBlockedTitle: "Conversion has blockers",
+    previewReadyDetail: "Review the projected Markdown before confirming the format change.",
+    previewBlockedDetail: "Fix the blockers below before converting this locale.",
+    previewFailedTitle: "Conversion preview failed",
+    previewFailedFallback: "Failed to preview conversion",
+    conversionBlockedTitle: "Conversion blocked",
+    publishBlockedMessage: "TipTap publishing is not enabled yet. Hide this post before converting a published locale.",
+    convertingTitle: "Converting to rich text",
+    convertingDetail: "The server will recompute the conversion from the latest saved Markdown.",
+    convertedTitle: "Converted to rich text",
+    convertedDetail: "The locale now uses canonical TipTap JSON and keeps a Markdown restore snapshot.",
+    conversionFailedTitle: "Conversion failed",
+    conversionFailedFallback: "Failed to convert to rich text",
+    restoringTitle: "Restoring Markdown snapshot",
+    restoringDetail: "The saved Markdown snapshot will replace the TipTap JSON for this locale.",
+    restoredTitle: "Markdown restored",
+    restoredDetail: "The locale is back on the exact Markdown snapshot captured before conversion.",
+    restoreFailedTitle: "Restore failed",
+    restoreFailedFallback: "Failed to restore Markdown",
+    panelHeading: "Markdown storage",
+    panelDescription: "Preview how the saved Markdown will become TipTap before changing this locale.",
+    previewButton: "Preview TipTap conversion",
+    previewingButton: "Previewing...",
+    snapshotHeading: "Markdown snapshot available",
+    snapshotDescription: (snapshotAt: string | null) =>
+      `This locale can be restored to the exact Markdown captured before conversion${snapshotAt ? ` at ${snapshotAt}` : ""}.`,
+    restoreButton: "Restore Markdown snapshot",
+    loadingPreview: "Loading article preview…",
+    loadingEditor: "Loading rich text editor…",
+    conversionDialogTitle: "Convert Markdown to rich text?",
+    conversionDialogDescription: (language: string) =>
+      `This preview is based on the saved ${language} Markdown. The server recomputes the conversion when you confirm.`,
+    blockersHeading: "Blockers",
+    warningsHeading: "Warnings",
+    noBlockers: "No blockers found.",
+    noWarnings: "No warnings found.",
+    projectedMarkdownHeading: "Projected Markdown after conversion",
+    cancel: "Cancel",
+    convertButton: "Convert to rich text",
+    convertingButton: "Converting...",
+    restoreDialogTitle: "Restore Markdown snapshot?",
+    restoreDialogDescription: (language: string, snapshotAt: string | null) =>
+      `This replaces the ${language} TipTap JSON with the exact Markdown snapshot captured before conversion${snapshotAt ? ` at ${snapshotAt}` : ""}.`,
+    restoreConfirmButton: "Restore Markdown",
+    restoringButton: "Restoring..."
+  };
+}
+
+function getDialogFocusableElements(dialog: HTMLElement): HTMLElement[] {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR)).filter((element) => {
+    if (element.tabIndex < 0 || element.hasAttribute("disabled") || element.getAttribute("aria-hidden") === "true") {
+      return false;
+    }
+
+    return !(element instanceof HTMLInputElement && element.type === "hidden");
+  });
+}
 
 function isTiptapNewArticleEnabled(): boolean {
   return import.meta.env.VITE_TIPTAP_NEW_ARTICLE_ENABLED === "true";
@@ -525,12 +708,13 @@ function draftHasTiptapContent(translations: TranslationDrafts): boolean {
   return Object.values(translations).some((translation) => translation.content.format === "tiptap" && hasTranslationContent(translation));
 }
 
-function conversionDirtyMessage(): string {
-  return "Save or reload your current edits before changing the article format.";
+function conversionDirtyMessage(uiLocale: Locale): string {
+  return getFormatUiCopy(uiLocale).dirtyMessage;
 }
 
-function formatConversionIssue(issue: { line: number; message: string }): string {
-  return `Line ${issue.line}: ${issue.message}`;
+function formatConversionIssue(issue: { line: number; message: string }, uiLocale: Locale): string {
+  const copy = getFormatUiCopy(uiLocale);
+  return copy.lineSuffix ? `${copy.linePrefix} ${issue.line} ${copy.lineSuffix}: ${issue.message}` : `${copy.linePrefix} ${issue.line}: ${issue.message}`;
 }
 
 function conversionContextsMatch(first: ConversionContext, second: ConversionContext): boolean {
@@ -542,12 +726,12 @@ function conversionContextsMatch(first: ConversionContext, second: ConversionCon
   );
 }
 
-function formatDependencyPendingMessage(): string {
-  return "Wait for image uploads and tag creation to finish before changing the article format.";
+function formatDependencyPendingMessage(uiLocale: Locale): string {
+  return getFormatUiCopy(uiLocale).dependencyPendingMessage;
 }
 
-function changedBaselineMessage(): string {
-  return "Local edits changed while the format request was running. Your edits were kept; reload before retrying.";
+function changedBaselineMessage(uiLocale: Locale): string {
+  return getFormatUiCopy(uiLocale).changedBaselineMessage;
 }
 
 function markdownModeLabel(mode: MarkdownEditorMode, uiLocale: Locale): string {
@@ -628,6 +812,11 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const markdownTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const markdownSearchInputRef = useRef<HTMLInputElement | null>(null);
   const previewPaneRef = useRef<HTMLElement | null>(null);
+  const formatDialogRef = useRef<HTMLDivElement | null>(null);
+  const formatDialogTriggerRef = useRef<HTMLElement | null>(null);
+  const conversionCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previousFormatDialogRef = useRef<ActiveFormatDialog>(null);
   const isUploadingImageRef = useRef(false);
   const conversionRequestIdRef = useRef(0);
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
@@ -688,6 +877,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     upload: uploadAdminPostImage,
     onNotice: setArticleImageNotice
   });
+  const formatCopy = useMemo(() => getFormatUiCopy(locale), [locale]);
 
   function applyPostState(post: PublicPost) {
     const { translations: nextTranslations, editorErrors } = draftStateFromPost(post);
@@ -1313,13 +1503,124 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     void runTranslation(targetLocale);
   }
 
+  function rememberFormatDialogTrigger(event: MouseEvent<HTMLElement>) {
+    formatDialogTriggerRef.current = event.currentTarget;
+  }
+
+  function closeConversionPreview() {
+    if (isFormatDialogBusy) {
+      return;
+    }
+    setConversionPreview(null);
+  }
+
+  function closeRestoreMarkdownDialog() {
+    if (isFormatDialogBusy) {
+      return;
+    }
+    setPendingRestoreMarkdown(null);
+  }
+
+  function closeActiveFormatDialog() {
+    if (activeFormatDialog === "conversion-preview") {
+      closeConversionPreview();
+      return;
+    }
+
+    if (activeFormatDialog === "restore-markdown") {
+      closeRestoreMarkdownDialog();
+    }
+  }
+
+  function handleFormatDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      if (!isFormatDialogBusy) {
+        event.preventDefault();
+        closeActiveFormatDialog();
+      }
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const dialog = formatDialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    const focusableElements = getDialogFocusableElements(dialog);
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!firstFocusable || !lastFocusable) {
+      return;
+    }
+
+    if (event.shiftKey) {
+      if (!activeElement || activeElement === firstFocusable || !dialog.contains(activeElement)) {
+        event.preventDefault();
+        lastFocusable.focus();
+      }
+      return;
+    }
+
+    if (!activeElement || activeElement === lastFocusable || !dialog.contains(activeElement)) {
+      event.preventDefault();
+      firstFocusable.focus();
+    }
+  }
+
+  useEffect(() => {
+    const previousDialog = previousFormatDialogRef.current;
+    previousFormatDialogRef.current = activeFormatDialog;
+
+    if (!activeFormatDialog) {
+      if (!previousDialog) {
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        const trigger = formatDialogTriggerRef.current;
+        if (trigger && document.contains(trigger)) {
+          trigger.focus();
+        }
+      });
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const preferredFocusTarget =
+        activeFormatDialog === "conversion-preview" ? conversionCancelButtonRef.current : restoreCancelButtonRef.current;
+      if (preferredFocusTarget && document.contains(preferredFocusTarget)) {
+        preferredFocusTarget.focus();
+        return;
+      }
+
+      const dialog = formatDialogRef.current;
+      if (!dialog) {
+        return;
+      }
+
+      const firstFocusable = getDialogFocusableElements(dialog)[0];
+      (firstFocusable ?? dialog).focus();
+    });
+  }, [activeFormatDialog]);
+
   function getStableConversionContext(translationLocale: Locale): ConversionContext | null {
     if (!postId || !postUpdatedAt) {
-      const message = "Save this post before changing the article format.";
+      const message = formatCopy.saveBeforeChangingFormat;
       setError(message);
       setActionNotice({
         tone: "error",
-        title: "Format change unavailable",
+        title: formatCopy.unavailableTitle,
         detail: message
       });
       return null;
@@ -1331,22 +1632,22 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       articleImageUploadController.isUploading ||
       isCreatingTag
     ) {
-      const message = formatDependencyPendingMessage();
+      const message = formatDependencyPendingMessage(locale);
       setError(message);
       setActionNotice({
         tone: "error",
-        title: "Format change unavailable",
+        title: formatCopy.unavailableTitle,
         detail: message
       });
       return null;
     }
 
     if (isDirty) {
-      const message = conversionDirtyMessage();
+      const message = conversionDirtyMessage(locale);
       setError(message);
       setActionNotice({
         tone: "error",
-        title: "Save current edits first",
+        title: formatCopy.saveCurrentEditsTitle,
         detail: message
       });
       return null;
@@ -1390,12 +1691,12 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     }
 
     if (current.editorBaseline !== context.editorBaseline) {
-      const message = changedBaselineMessage();
+      const message = changedBaselineMessage(locale);
       setConversionPreview(null);
       setPendingRestoreMarkdown(null);
       setActionNotice({
         tone: "error",
-        title: "Format response not applied",
+        title: formatCopy.responseIgnoredTitle,
         detail: message
       });
       setError(message);
@@ -1418,8 +1719,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     setTranslationWarnings([]);
     setActionNotice({
       tone: "pending",
-      title: "Previewing rich text conversion",
-      detail: "Checking the saved Markdown body for unsupported structures."
+      title: formatCopy.previewPendingTitle,
+      detail: formatCopy.previewPendingDetail
     });
 
     try {
@@ -1431,20 +1732,20 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       setConversionPreview({ ...context, preview });
       setActionNotice({
         tone: preview.canConvert ? "success" : "error",
-        title: preview.canConvert ? "Conversion preview ready" : "Conversion has blockers",
+        title: preview.canConvert ? formatCopy.previewReadyTitle : formatCopy.previewBlockedTitle,
         detail: preview.canConvert
-          ? "Review the projected Markdown before confirming the format change."
-          : "Fix the blockers below before converting this locale."
+          ? formatCopy.previewReadyDetail
+          : formatCopy.previewBlockedDetail
       });
     } catch (caught) {
       if (!canApplyConversionResponse(requestId, context)) {
         return;
       }
 
-      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to preview conversion", locale);
+      const message = localizeSaveError(caught instanceof Error ? caught.message : formatCopy.previewFailedFallback, locale);
       setActionNotice({
         tone: "error",
-        title: "Conversion preview failed",
+        title: formatCopy.previewFailedTitle,
         detail: message
       });
       setError(message);
@@ -1472,10 +1773,10 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
     const conversionLocale = conversionPreview.locale;
     if (status === "published" && !isTiptapPublishEnabled()) {
-      const message = "TipTap publishing is not enabled yet. Hide this post before converting a published locale.";
+      const message = formatCopy.publishBlockedMessage;
       setActionNotice({
         tone: "error",
-        title: "Conversion blocked",
+        title: formatCopy.conversionBlockedTitle,
         detail: message
       });
       setError(message);
@@ -1487,8 +1788,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     setError(null);
     setActionNotice({
       tone: "pending",
-      title: "Converting to rich text",
-      detail: "The server will recompute the conversion from the latest saved Markdown."
+      title: formatCopy.convertingTitle,
+      detail: formatCopy.convertingDetail
     });
 
     try {
@@ -1504,18 +1805,18 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       setConversionPreview(null);
       setActionNotice({
         tone: "success",
-        title: "Converted to rich text",
-        detail: "The locale now uses canonical TipTap JSON and keeps a Markdown restore snapshot."
+        title: formatCopy.convertedTitle,
+        detail: formatCopy.convertedDetail
       });
     } catch (caught) {
       if (!canApplyConversionResponse(requestId, context)) {
         return;
       }
 
-      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to convert to rich text", locale);
+      const message = localizeSaveError(caught instanceof Error ? caught.message : formatCopy.conversionFailedFallback, locale);
       setActionNotice({
         tone: "error",
-        title: "Conversion failed",
+        title: formatCopy.conversionFailedTitle,
         detail: message
       });
       setError(message);
@@ -1560,8 +1861,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     setError(null);
     setActionNotice({
       tone: "pending",
-      title: "Restoring Markdown snapshot",
-      detail: "The saved Markdown snapshot will replace the TipTap JSON for this locale."
+      title: formatCopy.restoringTitle,
+      detail: formatCopy.restoringDetail
     });
 
     try {
@@ -1577,18 +1878,18 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       setPendingRestoreMarkdown(null);
       setActionNotice({
         tone: "success",
-        title: "Markdown restored",
-        detail: "The locale is back on the exact Markdown snapshot captured before conversion."
+        title: formatCopy.restoredTitle,
+        detail: formatCopy.restoredDetail
       });
     } catch (caught) {
       if (!canApplyConversionResponse(requestId, context)) {
         return;
       }
 
-      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to restore Markdown", locale);
+      const message = localizeSaveError(caught instanceof Error ? caught.message : formatCopy.restoreFailedFallback, locale);
       setActionNotice({
         tone: "error",
-        title: "Restore failed",
+        title: formatCopy.restoreFailedTitle,
         detail: message
       });
       setError(message);
@@ -1619,6 +1920,13 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const activeTiptapError = tiptapEditorErrors[activeLocale];
   const currentArticleDocument = currentTranslation.content.format === "tiptap" ? currentTranslation.content.doc : null;
   const canRestoreActiveMarkdown = isActiveTiptap && currentTranslation.canRestoreMarkdown;
+  const activeFormatDialog: ActiveFormatDialog = conversionPreview ? "conversion-preview" : pendingRestoreMarkdown ? "restore-markdown" : null;
+  const isFormatDialogBusy =
+    activeFormatDialog === "conversion-preview"
+      ? conversionAction === "convert"
+      : activeFormatDialog === "restore-markdown"
+        ? conversionAction === "restore"
+        : false;
   const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
   const editorStats = useMemo(() => {
@@ -1668,9 +1976,9 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     articleImageUploadController.isUploading ||
     isCreatingTag;
   const formatChangeDisabledTitle = isDirty
-    ? conversionDirtyMessage()
+    ? conversionDirtyMessage(locale)
     : hasPendingFormatDependency
-      ? formatDependencyPendingMessage()
+      ? formatDependencyPendingMessage(locale)
       : undefined;
   useUnsavedArticleWarning(isDirty);
   const isNewArticleTiptapEnabled = isTiptapNewArticleEnabled();
@@ -1693,6 +2001,19 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
         ? "富文本 AI 翻译将在结构保持管线完成后开放。"
         : "TipTap AI translation will be enabled after the structure-preserving pipeline ships."
       : undefined;
+
+  useEffect(() => {
+    if (isActiveTiptap) {
+      void loadArticleEditorModule();
+    }
+  }, [isActiveTiptap]);
+
+  useEffect(() => {
+    if (isActiveTiptap || activeTiptapError || editorMode !== "source" || Boolean(conversionPreview?.preview.projectedMarkdown)) {
+      void loadMarkdownPreviewModule();
+    }
+  }, [activeTiptapError, conversionPreview?.preview.projectedMarkdown, editorMode, isActiveTiptap]);
+
   const canPreview = Boolean(postId && slug.trim() && status !== "draft");
   const selectedTags = useMemo(
     () =>
@@ -2024,14 +2345,14 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 />
               ) : null}
               {postId && !isActiveTiptap ? (
-                <div className="article-conversion-panel" aria-label="Article format conversion">
+                <div className="article-conversion-panel" aria-label={locale === "zh" ? "文章格式转换" : "Article format conversion"}>
                   <div>
-                    <strong>Markdown storage</strong>
-                    <p>Preview how the saved Markdown will become TipTap before changing this locale.</p>
+                    <strong>{formatCopy.panelHeading}</strong>
+                    <p>{formatCopy.panelDescription}</p>
                     {isDirty ? (
-                      <span>{conversionDirtyMessage()}</span>
+                      <span>{conversionDirtyMessage(locale)}</span>
                     ) : hasPendingFormatDependency ? (
-                      <span>{formatDependencyPendingMessage()}</span>
+                      <span>{formatDependencyPendingMessage(locale)}</span>
                     ) : null}
                   </div>
                   <button
@@ -2039,24 +2360,27 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                     type="button"
                     disabled={isBusy || isDirty || hasPendingFormatDependency}
                     title={formatChangeDisabledTitle}
-                    onClick={() => void previewTiptapConversion(activeLocale)}
+                    onClick={(event) => {
+                      rememberFormatDialogTrigger(event);
+                      void previewTiptapConversion(activeLocale);
+                    }}
                   >
-                    {conversionAction === "preview" ? "Previewing..." : "Preview TipTap conversion"}
+                    {conversionAction === "preview" ? formatCopy.previewingButton : formatCopy.previewButton}
                   </button>
                 </div>
               ) : null}
               {postId && canRestoreActiveMarkdown ? (
-                <div className="article-conversion-panel article-conversion-panel--restore" aria-label="Article format conversion">
+                <div
+                  className="article-conversion-panel article-conversion-panel--restore"
+                  aria-label={locale === "zh" ? "文章格式转换" : "Article format conversion"}
+                >
                   <div>
-                    <strong>Markdown snapshot available</strong>
-                    <p>
-                      This locale can be restored to the exact Markdown captured before conversion
-                      {currentTranslation.restoreMarkdownSnapshotAt ? ` at ${currentTranslation.restoreMarkdownSnapshotAt}` : ""}.
-                    </p>
+                    <strong>{formatCopy.snapshotHeading}</strong>
+                    <p>{formatCopy.snapshotDescription(currentTranslation.restoreMarkdownSnapshotAt)}</p>
                     {isDirty ? (
-                      <span>{conversionDirtyMessage()}</span>
+                      <span>{conversionDirtyMessage(locale)}</span>
                     ) : hasPendingFormatDependency ? (
-                      <span>{formatDependencyPendingMessage()}</span>
+                      <span>{formatDependencyPendingMessage(locale)}</span>
                     ) : null}
                   </div>
                   <button
@@ -2064,9 +2388,12 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                     type="button"
                     disabled={isBusy || isDirty || hasPendingFormatDependency}
                     title={formatChangeDisabledTitle}
-                    onClick={() => requestRestoreMarkdown(activeLocale)}
+                    onClick={(event) => {
+                      rememberFormatDialogTrigger(event);
+                      requestRestoreMarkdown(activeLocale);
+                    }}
                   >
-                    Restore Markdown snapshot
+                    {formatCopy.restoreButton}
                   </button>
                 </div>
               ) : null}
@@ -2211,24 +2538,28 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                         ? "为避免覆盖原文，当前语言暂时只能查看兼容预览，请重新加载或恢复内容后再保存。"
                         : "To avoid overwriting the original article, this locale is read-only until you reload or restore the content."}
                     </p>
-                    <MarkdownPreview markdown={currentTranslation.contentMarkdown} locale={locale} />
+                    <Suspense fallback={<EditorSurfaceFallback message={formatCopy.loadingPreview} />}>
+                      <LazyMarkdownPreview markdown={currentTranslation.contentMarkdown} locale={locale} />
+                    </Suspense>
                   </div>
                 ) : (
-                  <ArticleEditor
-                    key={activeLocale}
-                    value={currentArticleDocument}
-                    locale={activeLocale}
-                    onChange={updateActiveArticleDocument}
-                    onInvalidContent={(caught) =>
-                      setTiptapEditorErrors((current) => ({
-                        ...current,
-                        [activeLocale]: caught instanceof Error ? caught.message : "Invalid article content"
-                      }))
-                    }
-                    imageUploadController={articleImageUploadController}
-                    imageUploadNotice={articleImageNotice}
-                    readOnly={isBusy}
-                  />
+                  <Suspense fallback={<EditorSurfaceFallback message={formatCopy.loadingEditor} />}>
+                    <LazyArticleEditor
+                      key={activeLocale}
+                      value={currentArticleDocument}
+                      locale={activeLocale}
+                      onChange={updateActiveArticleDocument}
+                      onInvalidContent={(caught) =>
+                        setTiptapEditorErrors((current) => ({
+                          ...current,
+                          [activeLocale]: caught instanceof Error ? caught.message : "Invalid article content"
+                        }))
+                      }
+                      imageUploadController={articleImageUploadController}
+                      imageUploadNotice={articleImageNotice}
+                      readOnly={isBusy}
+                    />
+                  </Suspense>
                 )
               ) : null}
 
@@ -2247,14 +2578,16 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
               <span>{locale === "zh" ? "预览" : "Preview"}</span>
               <strong>{languageLabel(activeLocale, locale)}</strong>
             </div>
-            <MarkdownPreview
-              translation={{
-                locale: activeLocale,
-                content: currentTranslation.content,
-                contentMarkdown: isActiveTiptap ? currentTranslation.contentMarkdown : deferredMarkdown
-              }}
-              locale={locale}
-            />
+            <Suspense fallback={<EditorSurfaceFallback message={formatCopy.loadingPreview} />}>
+              <LazyMarkdownPreview
+                translation={{
+                  locale: activeLocale,
+                  content: currentTranslation.content,
+                  contentMarkdown: isActiveTiptap ? currentTranslation.contentMarkdown : deferredMarkdown
+                }}
+                locale={locale}
+              />
+            </Suspense>
             </aside>
           ) : null}
         </div>
@@ -2305,57 +2638,65 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
       {conversionPreview ? (
         <div className="modal-backdrop" role="presentation">
-          <div className="confirm-dialog confirm-dialog--wide" role="dialog" aria-modal="true" aria-labelledby="conversion-preview-title">
-            <h2 id="conversion-preview-title">Convert Markdown to rich text?</h2>
-            <p>
-              This preview is based on the saved {languageLabel(conversionPreview.locale, locale)} Markdown. The server recomputes
-              the conversion when you confirm.
-            </p>
+          <div
+            ref={formatDialogRef}
+            className="confirm-dialog confirm-dialog--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="conversion-preview-title"
+            tabIndex={-1}
+            onKeyDown={handleFormatDialogKeyDown}
+          >
+            <h2 id="conversion-preview-title">{formatCopy.conversionDialogTitle}</h2>
+            <p>{formatCopy.conversionDialogDescription(languageLabel(conversionPreview.locale, locale))}</p>
             <div className="conversion-preview-summary">
               <div>
-                <strong>Blockers</strong>
+                <strong>{formatCopy.blockersHeading}</strong>
                 {conversionPreview.preview.blockers.length > 0 ? (
                   <ul>
                     {conversionPreview.preview.blockers.map((issue) => (
-                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue)}</li>
+                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue, locale)}</li>
                     ))}
                   </ul>
                 ) : (
-                  <span>No blockers found.</span>
+                  <span>{formatCopy.noBlockers}</span>
                 )}
               </div>
               <div>
-                <strong>Warnings</strong>
+                <strong>{formatCopy.warningsHeading}</strong>
                 {conversionPreview.preview.warnings.length > 0 ? (
                   <ul>
                     {conversionPreview.preview.warnings.map((issue) => (
-                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue)}</li>
+                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue, locale)}</li>
                     ))}
                   </ul>
                 ) : (
-                  <span>No warnings found.</span>
+                  <span>{formatCopy.noWarnings}</span>
                 )}
               </div>
             </div>
             {status === "published" && !isTiptapPublishGateEnabled ? (
               <p className="warning-text">
-                TipTap publishing is not enabled yet. Hide this post before converting a published locale.
+                {formatCopy.publishBlockedMessage}
               </p>
             ) : null}
             {conversionPreview.preview.projectedMarkdown ? (
               <div className="conversion-preview-markdown">
-                <strong>Projected Markdown after conversion</strong>
-                <MarkdownPreview markdown={conversionPreview.preview.projectedMarkdown} locale={locale} />
+                <strong>{formatCopy.projectedMarkdownHeading}</strong>
+                <Suspense fallback={<EditorSurfaceFallback message={formatCopy.loadingPreview} />}>
+                  <LazyMarkdownPreview markdown={conversionPreview.preview.projectedMarkdown} locale={locale} />
+                </Suspense>
               </div>
             ) : null}
             <div className="confirm-dialog__actions">
               <button
+                ref={conversionCancelButtonRef}
                 className="secondary-button"
                 type="button"
                 disabled={Boolean(conversionAction)}
-                onClick={() => setConversionPreview(null)}
+                onClick={closeConversionPreview}
               >
-                Cancel
+                {formatCopy.cancel}
               </button>
               <button
                 className="primary-button"
@@ -2369,7 +2710,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 }
                 onClick={() => void confirmTiptapConversion()}
               >
-                {conversionAction === "convert" ? "Converting..." : "Convert to rich text"}
+                {conversionAction === "convert" ? formatCopy.convertingButton : formatCopy.convertButton}
               </button>
             </div>
           </div>
@@ -2378,21 +2719,26 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
       {pendingRestoreMarkdown ? (
         <div className="modal-backdrop" role="presentation">
-          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-markdown-title">
-            <h2 id="restore-markdown-title">Restore Markdown snapshot?</h2>
-            <p>
-              This replaces the {languageLabel(pendingRestoreMarkdown.locale, locale)} TipTap JSON with the exact Markdown snapshot
-              captured before conversion
-              {pendingRestoreMarkdown.snapshotAt ? ` at ${pendingRestoreMarkdown.snapshotAt}` : ""}.
-            </p>
+          <div
+            ref={formatDialogRef}
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-markdown-title"
+            tabIndex={-1}
+            onKeyDown={handleFormatDialogKeyDown}
+          >
+            <h2 id="restore-markdown-title">{formatCopy.restoreDialogTitle}</h2>
+            <p>{formatCopy.restoreDialogDescription(languageLabel(pendingRestoreMarkdown.locale, locale), pendingRestoreMarkdown.snapshotAt)}</p>
             <div className="confirm-dialog__actions">
               <button
+                ref={restoreCancelButtonRef}
                 className="secondary-button"
                 type="button"
                 disabled={Boolean(conversionAction)}
-                onClick={() => setPendingRestoreMarkdown(null)}
+                onClick={closeRestoreMarkdownDialog}
               >
-                Cancel
+                {formatCopy.cancel}
               </button>
               <button
                 className="primary-button"
@@ -2400,7 +2746,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 disabled={Boolean(conversionAction) || hasPendingFormatDependency}
                 onClick={() => void confirmRestoreMarkdown()}
               >
-                {conversionAction === "restore" ? "Restoring..." : "Restore Markdown"}
+                {conversionAction === "restore" ? formatCopy.restoringButton : formatCopy.restoreConfirmButton}
               </button>
             </div>
           </div>
