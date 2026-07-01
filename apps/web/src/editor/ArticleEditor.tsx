@@ -1,6 +1,5 @@
 import { articleExtensions } from "@tworiver/content-engine/editor";
-import { validateArticleDocument } from "@tworiver/content-engine";
-import type { ArticleDocument } from "@tworiver/content-engine/browser";
+import { validateArticleDocument, type ArticleDocument } from "@tworiver/content-engine/browser";
 import type { Locale } from "@tworiver/shared";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";

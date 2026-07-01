@@ -21,4 +21,15 @@ export { ArticleHtmlRenderError, renderArticleHtml } from "./renderArticleHtml.j
 export { isAllowedImage, isAllowedLink } from "./urlPolicy.js";
 export { migrateArticleDocument } from "./migrations/v1.js";
 export { normalizeArticleDocument } from "./normalizeDocument.js";
+export {
+  applyArticleTranslationBlocks,
+  extractArticleTranslationBlocks,
+  ArticleTranslationTopologyError
+} from "./translation.js";
+export type {
+  ArticleTranslatedBlock,
+  ArticleTranslatedSegment,
+  ArticleTranslationBlock,
+  ArticleTranslationSegment
+} from "./translation.js";
 export { validateArticleDocument } from "./validateDocument.js";

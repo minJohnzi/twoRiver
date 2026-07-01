@@ -1,5 +1,11 @@
-import { ARTICLE_DOCUMENT_SCHEMA_VERSION } from "@tworiver/content-engine";
 import {
+  ARTICLE_DOCUMENT_SCHEMA_VERSION,
+  ArticleDocumentValidationError,
+  extractArticleProse,
+  validateArticleDocument
+} from "@tworiver/content-engine";
+import {
+  ArticleContentSchema,
   ArticleLocaleParamsSchema,
   BulkPostActionInputSchema,
   ConvertArticleContentInputSchema,
@@ -36,7 +42,7 @@ import {
   previewArticleMarkdownConversion
 } from "../services/articleContentService.js";
 import { AiClientNotConfiguredError, AiProviderError } from "../services/ai/aiClient.js";
-import { draftPostTranslation } from "../services/ai/translationDraftService.js";
+import { draftPostTranslation, TranslationDraftContractError } from "../services/ai/translationDraftService.js";
 import { removePostImageDirectory } from "../services/uploads/uploadPaths.js";
 import { parseId } from "./parseId.js";
 
@@ -48,13 +54,25 @@ interface AdminPostRouteOptions {
   config: AppConfig;
 }
 
-const TranslateDraftInputSchema = z.object({
-  source: z.object({
+const TranslateDraftSourceSchema = z
+  .object({
     locale: z.enum(["zh", "en"]),
     title: z.string().default(""),
     summary: z.string().default(""),
+    content: ArticleContentSchema.optional(),
     contentMarkdown: z.string().default("")
-  }),
+  })
+  .transform((source) => {
+    const content = source.content ?? { format: "markdown" as const, markdown: source.contentMarkdown };
+    return {
+      ...source,
+      content,
+      contentMarkdown: content.format === "markdown" ? content.markdown : source.contentMarkdown
+    };
+  });
+
+const TranslateDraftInputSchema = z.object({
+  source: TranslateDraftSourceSchema,
   targetLocale: z.enum(["zh", "en"])
 });
 
@@ -252,18 +270,26 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
       return;
     }
 
-    if (!source.title.trim() && !source.contentMarkdown.trim()) {
-      reply.code(400).send({ message: "Add a title or body before translating" });
-      return;
-    }
-
     try {
+      const sourceBody =
+        source.content.format === "markdown"
+          ? source.content.markdown
+          : extractArticleProse(validateArticleDocument(source.content.doc));
+      if (!source.title.trim() && !sourceBody.trim()) {
+        reply.code(400).send({ message: "Add a title or body before translating" });
+        return;
+      }
+
       const aiConfig = {
         ...(config.DEEPSEEK_API_KEY ? { apiKey: config.DEEPSEEK_API_KEY } : {}),
         baseUrl: config.DEEPSEEK_BASE_URL
       };
       return await draftPostTranslation(aiConfig, source, targetLocale);
     } catch (error) {
+      if (error instanceof ArticleDocumentValidationError) {
+        reply.code(400).send({ message: "TipTap draft content is invalid" });
+        return;
+      }
       if (error instanceof AiClientNotConfiguredError) {
         reply.code(503).send({ message: "AI translation is not configured" });
         return;
@@ -281,6 +307,10 @@ export async function adminPostRoutes(app: FastifyInstance, { config }: AdminPos
 
         request.log.error({ error, status: error.status }, "Failed to draft post translation");
         reply.code(502).send({ message: "AI translation provider failed. Try again later." });
+        return;
+      }
+      if (error instanceof TranslationDraftContractError) {
+        reply.code(502).send({ message: error.message });
         return;
       }
 

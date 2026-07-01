@@ -162,7 +162,7 @@ export function deleteAdminResource(url: string) {
 }
 
 export interface TranslatePostDraftInput {
-  source: Pick<PostTranslation, "locale" | "title" | "summary" | "contentMarkdown">;
+  source: Pick<PostTranslation, "locale" | "title" | "summary" | "content" | "contentMarkdown">;
   targetLocale: Locale;
 }
 

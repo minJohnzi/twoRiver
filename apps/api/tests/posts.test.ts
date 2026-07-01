@@ -291,6 +291,146 @@ describe("post routes", () => {
     }
   });
 
+  test("drafts a TipTap translation while preserving block and segment topology", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "中文标题",
+                  summary: "中文摘要",
+                  blocks: [
+                    {
+                      blockId: "content[0]",
+                      segments: [{ segmentId: "content[0].content[0].text", text: "引言" }]
+                    },
+                    {
+                      blockId: "content[1]",
+                      segments: [{ segmentId: "content[1].content[0].text", text: "正文" }]
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const app = await createTestAppWithConfig(makeConfigWithAi);
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/translate-draft",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          source: {
+            locale: "en",
+            title: "English title",
+            summary: "English summary",
+            content: tiptapContent
+          },
+          targetLocale: "zh"
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        translation: {
+          locale: "zh",
+          title: "中文标题",
+          summary: "中文摘要",
+          content: {
+            format: "tiptap",
+            schemaVersion: 1,
+            doc: {
+              type: "doc",
+              content: [
+                {
+                  type: "heading",
+                  attrs: { level: 2 },
+                  content: [{ type: "text", text: "引言" }]
+                },
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "正文" }]
+                }
+              ]
+            }
+          },
+          contentMarkdown: "## 引言\n\n正文\n",
+          seoTitle: null,
+          seoDescription: null
+        },
+        warnings: []
+      });
+    } finally {
+      fetchMock.mockRestore();
+      await app.close();
+    }
+  });
+
+  test("rejects a TipTap translation when the AI changes the returned segment topology", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: "中文标题",
+                  summary: "中文摘要",
+                  blocks: [
+                    {
+                      blockId: "content[0]",
+                      segments: [{ segmentId: "content[0].content[0].text", text: "引言" }]
+                    },
+                    {
+                      blockId: "content[1]",
+                      segments: [{ segmentId: "content[1].content[9].text", text: "被合并的正文" }]
+                    }
+                  ]
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    const app = await createTestAppWithConfig(makeConfigWithAi);
+
+    try {
+      const { cookie, csrfToken } = await loginWithCsrf(app);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/admin/posts/translate-draft",
+        headers: { cookie, "x-csrf-token": csrfToken },
+        payload: {
+          source: {
+            locale: "en",
+            title: "English title",
+            summary: "",
+            content: tiptapContent
+          },
+          targetLocale: "zh"
+        }
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toEqual({
+        message: "AI translation changed the TipTap document structure. The source draft was left unchanged."
+      });
+    } finally {
+      fetchMock.mockRestore();
+      await app.close();
+    }
+  });
+
   test("returns an actionable message when the AI provider reports quota exhaustion", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: { message: "Insufficient balance" } }), {

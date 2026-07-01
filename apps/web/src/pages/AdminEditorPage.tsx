@@ -5,7 +5,7 @@ import {
   validateArticleDocument,
   type ArticleDocument,
   type ArticleNode
-} from "@tworiver/content-engine";
+} from "@tworiver/content-engine/browser";
 import type {
   ArticleContent,
   Category,
@@ -1471,6 +1471,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           locale: sourceLocale,
           title: source.title,
           summary: source.summary,
+          content: source.content,
           contentMarkdown: source.contentMarkdown
         },
         targetLocale
@@ -1478,12 +1479,9 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
 
       setTranslations((current) => ({
         ...current,
-        [targetLocale]: createMarkdownDraft({
-          title: translation.title,
-          summary: translation.summary,
-          contentMarkdown: translation.contentMarkdown
-        })
+        [targetLocale]: translationDraftFromPost(translation)
       }));
+      setTiptapEditorErrors((current) => ({ ...current, [targetLocale]: undefined }));
       setActiveLocale(targetLocale);
       setTranslationWarnings(warnings);
     } catch (caught) {
@@ -1577,6 +1575,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       firstFocusable.focus();
     }
   }
+
+  const activeFormatDialog: ActiveFormatDialog = conversionPreview ? "conversion-preview" : pendingRestoreMarkdown ? "restore-markdown" : null;
 
   useEffect(() => {
     const previousDialog = previousFormatDialogRef.current;
@@ -1920,7 +1920,6 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const activeTiptapError = tiptapEditorErrors[activeLocale];
   const currentArticleDocument = currentTranslation.content.format === "tiptap" ? currentTranslation.content.doc : null;
   const canRestoreActiveMarkdown = isActiveTiptap && currentTranslation.canRestoreMarkdown;
-  const activeFormatDialog: ActiveFormatDialog = conversionPreview ? "conversion-preview" : pendingRestoreMarkdown ? "restore-markdown" : null;
   const isFormatDialogBusy =
     activeFormatDialog === "conversion-preview"
       ? conversionAction === "convert"
@@ -1996,10 +1995,10 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       : "TipTap publishing is not enabled yet. Save a draft first."
     : undefined;
   const translationDisabledTitle =
-    isActiveTiptap
+    isActiveTiptap && activeTiptapError
       ? locale === "zh"
-        ? "富文本 AI 翻译将在结构保持管线完成后开放。"
-        : "TipTap AI translation will be enabled after the structure-preserving pipeline ships."
+        ? "当前富文本正文无法加载，请先刷新或恢复后再翻译。"
+        : "Reload or restore this TipTap draft before translating."
       : undefined;
 
   useEffect(() => {
@@ -2288,7 +2287,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                   <button
                     className="secondary-button"
                     type="button"
-                    disabled={isBusy || isActiveTiptap}
+                    disabled={isBusy || Boolean(translationDisabledTitle)}
                     title={translationDisabledTitle}
                     onClick={requestTranslation}
                   >

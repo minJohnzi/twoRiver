@@ -55,6 +55,33 @@ bash scripts/deploy-update.sh
 bash scripts/deploy-update.sh --force
 ```
 
+## TipTap 小批量转换上线
+
+在开启 TipTap 发布闸门前，先按“小批量、可回退、可核对”的方式转换少量文章：
+
+1. 部署前确认数据库和 `apps/api/data/uploads` 已完成备份，且当前工作树干净。
+2. 先只开启 `VITE_TIPTAP_NEW_ARTICLE_ENABLED=true`，继续保持 `TIPTAP_PUBLISH_ENABLED=false` 和 `VITE_TIPTAP_PUBLISH_ENABLED=false`。
+3. 选择 3–5 篇低风险文章作为首批转换对象，优先选择：
+   - 结构简单、最近有人审阅过的文章；
+   - 含图片、标题、列表等常见结构，能覆盖真实编辑路径；
+   - 不要先拿首页高流量或强 SEO 依赖文章做第一批。
+4. 每篇文章都先在后台执行“预检 TipTap 转换”，确认没有 blocker，再执行“转换为富文本”。
+5. 转换后逐篇检查：
+   - 富文本编辑器是否能正常加载；
+   - 兼容 Markdown 投影是否仍可阅读；
+   - “恢复 Markdown 快照”按钮是否可见；
+   - 图片、链接、代码块、表格是否仍能正确预览。
+6. 若文章需要双语，先完成 TipTap AI 翻译，再由编辑人工审阅目标语言草稿；结构漂移或翻译失败时不要手动覆盖原文，保留原语言并重试。
+7. 首批文章全部通过人工验收后，再开启 `TIPTAP_PUBLISH_ENABLED=true` 与 `VITE_TIPTAP_PUBLISH_ENABLED=true`，发布这批文章。
+8. 发布后至少观察一个发布窗口，重点检查：
+   - `/posts/:slug` 公开页是否正常渲染；
+   - 首页列表、目录、代码高亮、图片灯箱是否正常；
+   - API 日志中是否出现 TipTap 渲染或翻译错误；
+   - 是否有人误把已转换文章又降级保存回 Markdown。
+9. 若发现线上问题，优先使用文章级“恢复 Markdown 快照”回退单篇内容；只有当问题影响面较大时，才考虑关闭 TipTap 发布闸门并执行代码回滚。
+
+推荐节奏：第一批 3–5 篇，稳定后扩展到 10–20 篇，再评估是否把 TipTap 设为新文章默认格式。
+
 只更新前端：
 
 ```bash

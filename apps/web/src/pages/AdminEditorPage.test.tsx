@@ -212,6 +212,10 @@ async function loadedMarkdownTextarea() {
   return (await screen.findByLabelText("Markdown body")) as HTMLTextAreaElement;
 }
 
+async function loadedArticleTextbox() {
+  return (await screen.findByRole("textbox", { name: /Article body|文章正文/ }, { timeout: 4000 })) as HTMLElement;
+}
+
 describe("MarkdownPreview", () => {
   afterEach(() => {
     cleanup();
@@ -531,7 +535,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
     expect(screen.queryByRole("tablist", { name: "Markdown editor mode" })).not.toBeInTheDocument();
 
@@ -547,12 +551,12 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
     fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }));
     fireEvent.click(screen.getByRole("button", { name: "中文" }));
     expect(await screen.findByLabelText("Markdown body")).toHaveValue("中文 Markdown");
     fireEvent.click(screen.getByRole("button", { name: "EN" }));
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
 
     await waitFor(() =>
@@ -588,7 +592,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     const publishButton = screen.getByRole("button", { name: "Publish" });
     expect(publishButton).toBeDisabled();
     expect(publishButton).toHaveAttribute("title", "TipTap publishing is not enabled yet. Save a draft first.");
@@ -610,7 +614,7 @@ describe("admin editor image uploads", () => {
     expect(await screen.findByRole("button", { name: /Use Markdown/ })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
   });
 
@@ -624,7 +628,7 @@ describe("admin editor image uploads", () => {
     expect(screen.getByRole("button", { name: "Use rich text" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     expect(screen.getByDisplayValue("Title first")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Use Markdown/ }));
 
@@ -646,7 +650,7 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/new");
 
     fireEvent.click(await screen.findByRole("button", { name: "Use rich text" }));
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
 
     insert();
 
@@ -738,7 +742,7 @@ describe("admin editor image uploads", () => {
         expectedUpdatedAt: originalUpdatedAt
       })
     );
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
   });
 
@@ -1044,7 +1048,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
     fireEvent.click(screen.getByRole("button", { name: "Restore Markdown snapshot" }));
     fireEvent.click(within(await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" })).getByRole("button", { name: "Restore Markdown" }));
 
@@ -1144,7 +1148,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }));
 
     const restoreButton = screen.getByRole("button", { name: "Restore Markdown snapshot" });
@@ -1178,7 +1182,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     const restoreButton = screen.getByRole("button", { name: "Restore Markdown snapshot" });
     restoreButton.focus();
     fireEvent.click(restoreButton);
@@ -1227,7 +1231,7 @@ describe("admin editor image uploads", () => {
 
     renderEditorWithArticleSwitch("/admin/posts/1", 2);
 
-    const articleBody = await screen.findByRole("textbox", { name: "Article body" });
+    const articleBody = await loadedArticleTextbox();
     fireEvent.click(screen.getByRole("button", { name: "Restore Markdown snapshot" }));
     fireEvent.click(
       within(await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" })).getByRole("button", {
@@ -1277,7 +1281,7 @@ describe("admin editor image uploads", () => {
 
     renderEditor("/admin/posts/1");
 
-    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     const initialBeforeUnloadAdds = addEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length;
     const initialBeforeUnloadRemoves = removeEventListener.mock.calls.filter(([eventName]) => eventName === "beforeunload").length;
 
@@ -1610,6 +1614,7 @@ describe("admin editor image uploads", () => {
           locale: "en",
           title: "Draft",
           summary: "",
+          content: { format: "markdown", markdown: "Hello world" },
           contentMarkdown: "Hello world"
         },
         targetLocale: "zh"
@@ -1674,5 +1679,74 @@ describe("admin editor image uploads", () => {
     expect(await screen.findByText("AI quota or rate limit reached. Check the API key balance or try again later.")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Translation progress" })).not.toBeInTheDocument();
     expect(textarea).toHaveValue("Hello world");
+  });
+
+  it("translates an active TipTap draft through the structure-preserving pipeline", async () => {
+    const translatedZhDocument: ArticleDocument = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "中文 TipTap 正文" }] }]
+    };
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makePost({
+        translations: [
+          {
+            locale: "en",
+            title: "TipTap Draft",
+            summary: "",
+            contentMarkdown: "TipTap body\n",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: tiptapDocument
+            },
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+    mockedTranslateAdminPostDraft.mockResolvedValue({
+      translation: {
+        locale: "zh",
+        title: "中文 TipTap 草稿",
+        summary: "结构保持翻译",
+        content: {
+          format: "tiptap",
+          schemaVersion: 1,
+          doc: translatedZhDocument
+        },
+        contentMarkdown: "中文 TipTap 正文\n",
+        seoTitle: null,
+        seoDescription: null
+      },
+      warnings: []
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
+    const translateButton = screen.getByRole("button", { name: "Translate to Chinese" });
+    expect(translateButton).toBeEnabled();
+    fireEvent.click(translateButton);
+
+    await waitFor(() =>
+      expect(mockedTranslateAdminPostDraft).toHaveBeenCalledWith({
+        source: {
+          locale: "en",
+          title: "TipTap Draft",
+          summary: "",
+          content: {
+            format: "tiptap",
+            schemaVersion: 1,
+            doc: tiptapDocument
+          },
+          contentMarkdown: "TipTap body\n"
+        },
+        targetLocale: "zh"
+      })
+    );
+    expect(await screen.findByDisplayValue("中文 TipTap 草稿")).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toHaveTextContent("中文 TipTap 正文");
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
   });
 });

@@ -9,5 +9,8 @@ export {
 } from "./documentLimits.js";
 export { collectArticleResourceReferences } from "./collectResourceReferences.js";
 export { extractArticleProse, extractArticleText } from "./extractText.js";
+export { normalizeProjectedMarkdown, projectArticleToMarkdown } from "./markdownProjection.js";
 export { ArticleHtmlRenderError, renderArticleHtml } from "./renderArticleHtml.js";
 export { isAllowedImage, isAllowedLink } from "./urlPolicy.js";
+export { normalizeArticleDocument } from "./normalizeDocument.js";
+export { validateArticleDocument } from "./validateDocument.js";

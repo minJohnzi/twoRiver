@@ -155,15 +155,14 @@ describe("article document schema", () => {
     expectValidationCode({ type: "doc", content: [{ type: "codeBlock", attrs: { language: "../ts" }, content: [{ type: "text", text: "Bad" }] }] }, "invalid-code-language");
   });
 
-  test("browser entry imports only browser-safe leaf modules", async () => {
+  test("browser entry imports only browser-safe modules and exports validation helpers", async () => {
     const browserModule = await import("../src/browser.js");
     expect(browserModule.ARTICLE_DOCUMENT_SCHEMA_VERSION).toBe(1);
-    expect("validateArticleDocument" in browserModule).toBe(false);
+    expect("validateArticleDocument" in browserModule).toBe(true);
 
     const browserSource = readFileSync(resolve(process.cwd(), "src/browser.ts"), "utf8");
     expect(browserSource).not.toContain("./index.js");
     expect(browserSource).not.toContain("./articleExtensions.js");
-    expect(browserSource).not.toContain("./validateDocument.js");
     expect(browserSource).not.toContain("lowlight");
   });
 });
