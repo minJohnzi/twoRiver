@@ -3,9 +3,20 @@ import {
   extractArticleProse,
   projectArticleToMarkdown,
   validateArticleDocument,
-  type ArticleDocument
+  type ArticleDocument,
+  type ArticleNode
 } from "@tworiver/content-engine";
-import type { ArticleContent, Category, Locale, PostStatus, PostTranslation, PublicPost, Tag, UpsertPostInput } from "@tworiver/shared";
+import type {
+  ArticleContent,
+  Category,
+  Locale,
+  MarkdownConversionPreview,
+  PostStatus,
+  PostTranslation,
+  PublicPost,
+  Tag,
+  UpsertPostInput
+} from "@tworiver/shared";
 import {
   type ClipboardEvent,
   type DragEvent,
@@ -21,11 +32,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   createAdminTag,
   createAdminPost,
+  convertAdminPostTranslationToTiptap,
   deleteAdminPost,
   fetchAdminCategories,
   fetchAdminTags,
   fetchAdminPosts,
   fetchAdminPost,
+  previewAdminPostTiptapConversion,
+  restoreAdminPostTranslationMarkdown,
   translateAdminPostDraft,
   updateAdminPost,
   uploadAdminPostImage
@@ -46,6 +60,8 @@ interface TranslationDraft {
   summary: string;
   content: ArticleContent;
   contentMarkdown: string;
+  canRestoreMarkdown: boolean;
+  restoreMarkdownSnapshotAt: string | null;
 }
 
 type TranslationDrafts = Record<Locale, TranslationDraft>;
@@ -53,6 +69,10 @@ type SaveAction = "draft" | "save" | "publish" | "hide" | "republish" | null;
 type ActionNotice = { tone: "pending" | "success" | "error"; title: string; detail: string };
 type MarkdownEditorMode = "source" | "split" | "preview";
 type MarkdownSearchState = { isOpen: boolean; query: string; currentIndex: number };
+type ConversionAction = "preview" | "convert" | "restore" | null;
+type ConversionContext = { postId: number; expectedUpdatedAt: string; locale: Locale; editorBaseline: string };
+type ConversionPreviewState = (ConversionContext & { preview: MarkdownConversionPreview }) | null;
+type RestoreMarkdownState = (ConversionContext & { snapshotAt: string | null }) | null;
 
 interface MarkdownHeading {
   id: string;
@@ -97,6 +117,8 @@ function createMarkdownDraft(overrides: Partial<TranslationDraft> = {}): Transla
     summary: "",
     content: { format: "markdown", markdown: contentMarkdown },
     contentMarkdown,
+    canRestoreMarkdown: false,
+    restoreMarkdownSnapshotAt: null,
     ...overrides
   };
 }
@@ -115,6 +137,8 @@ function createTiptapDraft(overrides: Partial<TranslationDraft> = {}): Translati
     summary: "",
     content,
     contentMarkdown: overrides.contentMarkdown ?? projectArticleToMarkdown(content.doc),
+    canRestoreMarkdown: false,
+    restoreMarkdownSnapshotAt: null,
     ...overrides
   };
 }
@@ -298,8 +322,28 @@ function translationBodyText(translation: TranslationDraft): string {
   return translation.contentMarkdown;
 }
 
+function isEmptyArticleParagraph(node: ArticleNode): boolean {
+  return (
+    node.type === "paragraph" &&
+    (node.content ?? []).every(
+      (child) => child.type === "hardBreak" || (child.type === "text" && !(child.text ?? "").trim())
+    )
+  );
+}
+
+function hasArticleDocumentBodyContent(document: ArticleDocument): boolean {
+  return document.content.some((node) => !isEmptyArticleParagraph(node));
+}
+
+function hasTranslationBodyContent(translation: TranslationDraft): boolean {
+  if (translation.content.format === "tiptap") {
+    return hasArticleDocumentBodyContent(translation.content.doc);
+  }
+  return Boolean(translation.contentMarkdown.trim());
+}
+
 function hasTranslationContent(translation: TranslationDraft): boolean {
-  return Boolean(translation.title.trim() || translation.summary.trim() || translationBodyText(translation).trim());
+  return Boolean(translation.title.trim() || translation.summary.trim() || hasTranslationBodyContent(translation));
 }
 
 function validatePostInput(input: UpsertPostInput, uiLocale: Locale): string | null {
@@ -418,7 +462,9 @@ function translationDraftFromPost(translation: PostTranslation): TranslationDraf
       title: translation.title,
       summary: translation.summary,
       content: { ...content, doc },
-      contentMarkdown: translation.contentMarkdown
+      contentMarkdown: translation.contentMarkdown,
+      canRestoreMarkdown: translation.canRestoreMarkdown === true,
+      restoreMarkdownSnapshotAt: translation.restoreMarkdownSnapshotAt ?? null
     });
   }
 
@@ -426,7 +472,9 @@ function translationDraftFromPost(translation: PostTranslation): TranslationDraf
     title: translation.title,
     summary: translation.summary,
     content: { format: "markdown", markdown: translation.contentMarkdown },
-    contentMarkdown: translation.contentMarkdown
+    contentMarkdown: translation.contentMarkdown,
+    canRestoreMarkdown: translation.canRestoreMarkdown === true,
+    restoreMarkdownSnapshotAt: translation.restoreMarkdownSnapshotAt ?? null
   });
 }
 
@@ -444,7 +492,9 @@ function draftStateFromPost(post: PublicPost): {
       translations[translation.locale] = createTiptapDraft({
         title: translation.title,
         summary: translation.summary,
-        contentMarkdown: translation.contentMarkdown
+        contentMarkdown: translation.contentMarkdown,
+        canRestoreMarkdown: translation.canRestoreMarkdown === true,
+        restoreMarkdownSnapshotAt: translation.restoreMarkdownSnapshotAt ?? null
       });
       editorErrors[translation.locale] = "Stored article JSON could not be loaded.";
     }
@@ -473,6 +523,31 @@ function serializeEditorState(input: {
 
 function draftHasTiptapContent(translations: TranslationDrafts): boolean {
   return Object.values(translations).some((translation) => translation.content.format === "tiptap" && hasTranslationContent(translation));
+}
+
+function conversionDirtyMessage(): string {
+  return "Save or reload your current edits before changing the article format.";
+}
+
+function formatConversionIssue(issue: { line: number; message: string }): string {
+  return `Line ${issue.line}: ${issue.message}`;
+}
+
+function conversionContextsMatch(first: ConversionContext, second: ConversionContext): boolean {
+  return (
+    first.postId === second.postId &&
+    first.expectedUpdatedAt === second.expectedUpdatedAt &&
+    first.locale === second.locale &&
+    first.editorBaseline === second.editorBaseline
+  );
+}
+
+function formatDependencyPendingMessage(): string {
+  return "Wait for image uploads and tag creation to finish before changing the article format.";
+}
+
+function changedBaselineMessage(): string {
+  return "Local edits changed while the format request was running. Your edits were kept; reload before retrying.";
 }
 
 function markdownModeLabel(mode: MarkdownEditorMode, uiLocale: Locale): string {
@@ -554,6 +629,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const markdownSearchInputRef = useRef<HTMLInputElement | null>(null);
   const previewPaneRef = useRef<HTMLElement | null>(null);
   const isUploadingImageRef = useRef(false);
+  const conversionRequestIdRef = useRef(0);
   const [activeLocale, setActiveLocale] = useState<Locale>(locale);
   const [postUid, setPostUid] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -571,6 +647,12 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [tagSelectorError, setTagSelectorError] = useState<string | null>(null);
   const [translations, setTranslations] = useState<TranslationDrafts>(cloneTranslations);
   const [postUpdatedAt, setPostUpdatedAt] = useState<string | null>(null);
+  const currentConversionContextRef = useRef<{
+    postId: number | undefined;
+    expectedUpdatedAt: string | null;
+    locale: Locale;
+    editorBaseline: string;
+  }>({ postId, expectedUpdatedAt: null, locale, editorBaseline: "" });
   const [isDraftBaselineReady, setIsDraftBaselineReady] = useState(!postId);
   const [savedBaseline, setSavedBaseline] = useState(() =>
     serializeEditorState({
@@ -597,6 +679,9 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const [isTranslating, setIsTranslating] = useState(false);
   const [pendingTranslationTarget, setPendingTranslationTarget] = useState<Locale | null>(null);
   const [translationWarnings, setTranslationWarnings] = useState<string[]>([]);
+  const [conversionAction, setConversionAction] = useState<ConversionAction>(null);
+  const [conversionPreview, setConversionPreview] = useState<ConversionPreviewState>(null);
+  const [pendingRestoreMarkdown, setPendingRestoreMarkdown] = useState<RestoreMarkdownState>(null);
   const [error, setError] = useState<string | null>(null);
   const articleImageUploadController = useArticleImageUpload({
     postUid,
@@ -662,6 +747,13 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }, [locale]);
 
   useEffect(() => {
+    conversionRequestIdRef.current += 1;
+    setConversionAction(null);
+    setConversionPreview(null);
+    setPendingRestoreMarkdown(null);
+    setActionNotice(null);
+    setTranslationWarnings([]);
+
     if (!postId) {
       const nextTranslations = cloneTranslations();
       setIsDraftBaselineReady(false);
@@ -757,17 +849,29 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   }
 
   function chooseActiveLocaleFormat(format: "markdown" | "tiptap") {
-    if (format === "markdown") {
-      return;
-    }
+    setTranslations((current) => {
+      const currentTranslation = current[activeLocale];
+      if (currentTranslation.content.format === format || hasTranslationBodyContent(currentTranslation)) {
+        return current;
+      }
 
-    setTranslations((current) => ({
-      ...current,
-      [activeLocale]: createTiptapDraft({
-        title: current[activeLocale].title,
-        summary: current[activeLocale].summary
-      })
-    }));
+      const nextTranslation =
+        format === "markdown"
+          ? createMarkdownDraft({
+              title: currentTranslation.title,
+              summary: currentTranslation.summary,
+              contentMarkdown: ""
+            })
+          : createTiptapDraft({
+              title: currentTranslation.title,
+              summary: currentTranslation.summary
+            });
+
+      return {
+        ...current,
+        [activeLocale]: nextTranslation
+      };
+    });
   }
 
   function addSelectedTagSlug(tagSlug: string) {
@@ -1209,6 +1313,292 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     void runTranslation(targetLocale);
   }
 
+  function getStableConversionContext(translationLocale: Locale): ConversionContext | null {
+    if (!postId || !postUpdatedAt) {
+      const message = "Save this post before changing the article format.";
+      setError(message);
+      setActionNotice({
+        tone: "error",
+        title: "Format change unavailable",
+        detail: message
+      });
+      return null;
+    }
+
+    if (
+      isUploadingImageRef.current ||
+      isUploadingImage ||
+      articleImageUploadController.isUploading ||
+      isCreatingTag
+    ) {
+      const message = formatDependencyPendingMessage();
+      setError(message);
+      setActionNotice({
+        tone: "error",
+        title: "Format change unavailable",
+        detail: message
+      });
+      return null;
+    }
+
+    if (isDirty) {
+      const message = conversionDirtyMessage();
+      setError(message);
+      setActionNotice({
+        tone: "error",
+        title: "Save current edits first",
+        detail: message
+      });
+      return null;
+    }
+
+    return {
+      postId,
+      expectedUpdatedAt: postUpdatedAt,
+      locale: translationLocale,
+      editorBaseline: currentConversionContextRef.current.editorBaseline
+    };
+  }
+
+  function isCurrentConversionContext(context: ConversionContext): boolean {
+    const current = currentConversionContextRef.current;
+    return (
+      current.postId === context.postId &&
+      current.expectedUpdatedAt === context.expectedUpdatedAt &&
+      current.locale === context.locale &&
+      current.editorBaseline === context.editorBaseline
+    );
+  }
+
+  function beginConversionRequest(): number {
+    conversionRequestIdRef.current += 1;
+    return conversionRequestIdRef.current;
+  }
+
+  function canApplyConversionResponse(requestId: number, context: ConversionContext): boolean {
+    if (conversionRequestIdRef.current !== requestId) {
+      return false;
+    }
+
+    const current = currentConversionContextRef.current;
+    if (
+      current.postId !== context.postId ||
+      current.expectedUpdatedAt !== context.expectedUpdatedAt ||
+      current.locale !== context.locale
+    ) {
+      return false;
+    }
+
+    if (current.editorBaseline !== context.editorBaseline) {
+      const message = changedBaselineMessage();
+      setConversionPreview(null);
+      setPendingRestoreMarkdown(null);
+      setActionNotice({
+        tone: "error",
+        title: "Format response not applied",
+        detail: message
+      });
+      setError(message);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function previewTiptapConversion(translationLocale: Locale) {
+    const context = getStableConversionContext(translationLocale);
+    if (!context) {
+      return;
+    }
+
+    const requestId = beginConversionRequest();
+    setConversionAction("preview");
+    setConversionPreview(null);
+    setError(null);
+    setTranslationWarnings([]);
+    setActionNotice({
+      tone: "pending",
+      title: "Previewing rich text conversion",
+      detail: "Checking the saved Markdown body for unsupported structures."
+    });
+
+    try {
+      const preview = await previewAdminPostTiptapConversion(context.postId, translationLocale);
+      if (!canApplyConversionResponse(requestId, context)) {
+        return;
+      }
+
+      setConversionPreview({ ...context, preview });
+      setActionNotice({
+        tone: preview.canConvert ? "success" : "error",
+        title: preview.canConvert ? "Conversion preview ready" : "Conversion has blockers",
+        detail: preview.canConvert
+          ? "Review the projected Markdown before confirming the format change."
+          : "Fix the blockers below before converting this locale."
+      });
+    } catch (caught) {
+      if (!canApplyConversionResponse(requestId, context)) {
+        return;
+      }
+
+      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to preview conversion", locale);
+      setActionNotice({
+        tone: "error",
+        title: "Conversion preview failed",
+        detail: message
+      });
+      setError(message);
+    } finally {
+      if (conversionRequestIdRef.current === requestId) {
+        setConversionAction(null);
+      }
+    }
+  }
+
+  async function confirmTiptapConversion() {
+    if (!conversionPreview) {
+      return;
+    }
+
+    const context = getStableConversionContext(conversionPreview.locale);
+    if (
+      !context ||
+      !conversionContextsMatch(context, conversionPreview) ||
+      !isCurrentConversionContext(conversionPreview)
+    ) {
+      setConversionPreview(null);
+      return;
+    }
+
+    const conversionLocale = conversionPreview.locale;
+    if (status === "published" && !isTiptapPublishEnabled()) {
+      const message = "TipTap publishing is not enabled yet. Hide this post before converting a published locale.";
+      setActionNotice({
+        tone: "error",
+        title: "Conversion blocked",
+        detail: message
+      });
+      setError(message);
+      return;
+    }
+
+    const requestId = beginConversionRequest();
+    setConversionAction("convert");
+    setError(null);
+    setActionNotice({
+      tone: "pending",
+      title: "Converting to rich text",
+      detail: "The server will recompute the conversion from the latest saved Markdown."
+    });
+
+    try {
+      const { post } = await convertAdminPostTranslationToTiptap(context.postId, conversionLocale, {
+        expectedUpdatedAt: context.expectedUpdatedAt
+      });
+      if (!canApplyConversionResponse(requestId, context) || post.id !== context.postId) {
+        return;
+      }
+
+      applyPostState(post);
+      setActiveLocale(conversionLocale);
+      setConversionPreview(null);
+      setActionNotice({
+        tone: "success",
+        title: "Converted to rich text",
+        detail: "The locale now uses canonical TipTap JSON and keeps a Markdown restore snapshot."
+      });
+    } catch (caught) {
+      if (!canApplyConversionResponse(requestId, context)) {
+        return;
+      }
+
+      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to convert to rich text", locale);
+      setActionNotice({
+        tone: "error",
+        title: "Conversion failed",
+        detail: message
+      });
+      setError(message);
+    } finally {
+      if (conversionRequestIdRef.current === requestId) {
+        setConversionAction(null);
+      }
+    }
+  }
+
+  function requestRestoreMarkdown(translationLocale: Locale) {
+    const context = getStableConversionContext(translationLocale);
+    if (!context) {
+      return;
+    }
+
+    const translation = translations[translationLocale];
+    setPendingRestoreMarkdown({
+      ...context,
+      snapshotAt: translation.restoreMarkdownSnapshotAt
+    });
+  }
+
+  async function confirmRestoreMarkdown() {
+    if (!pendingRestoreMarkdown) {
+      return;
+    }
+
+    const context = getStableConversionContext(pendingRestoreMarkdown.locale);
+    if (
+      !context ||
+      !conversionContextsMatch(context, pendingRestoreMarkdown) ||
+      !isCurrentConversionContext(pendingRestoreMarkdown)
+    ) {
+      setPendingRestoreMarkdown(null);
+      return;
+    }
+
+    const restoreLocale = pendingRestoreMarkdown.locale;
+    const requestId = beginConversionRequest();
+    setConversionAction("restore");
+    setError(null);
+    setActionNotice({
+      tone: "pending",
+      title: "Restoring Markdown snapshot",
+      detail: "The saved Markdown snapshot will replace the TipTap JSON for this locale."
+    });
+
+    try {
+      const { post } = await restoreAdminPostTranslationMarkdown(context.postId, restoreLocale, {
+        expectedUpdatedAt: context.expectedUpdatedAt
+      });
+      if (!canApplyConversionResponse(requestId, context) || post.id !== context.postId) {
+        return;
+      }
+
+      applyPostState(post);
+      setActiveLocale(restoreLocale);
+      setPendingRestoreMarkdown(null);
+      setActionNotice({
+        tone: "success",
+        title: "Markdown restored",
+        detail: "The locale is back on the exact Markdown snapshot captured before conversion."
+      });
+    } catch (caught) {
+      if (!canApplyConversionResponse(requestId, context)) {
+        return;
+      }
+
+      const message = localizeSaveError(caught instanceof Error ? caught.message : "Failed to restore Markdown", locale);
+      setActionNotice({
+        tone: "error",
+        title: "Restore failed",
+        detail: message
+      });
+      setError(message);
+    } finally {
+      if (conversionRequestIdRef.current === requestId) {
+        setConversionAction(null);
+      }
+    }
+  }
+
   function focusPreview() {
     if (editorMode === "source") {
       setEditorMode("split");
@@ -1228,6 +1618,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const isActiveTiptap = currentTranslation.content.format === "tiptap";
   const activeTiptapError = tiptapEditorErrors[activeLocale];
   const currentArticleDocument = currentTranslation.content.format === "tiptap" ? currentTranslation.content.doc : null;
+  const canRestoreActiveMarkdown = isActiveTiptap && currentTranslation.canRestoreMarkdown;
   const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
   const editorStats = useMemo(() => {
@@ -1250,7 +1641,8 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   );
   const activeSearchIndex = markdownSearchMatches.length > 0 ? Math.min(markdownSearch.currentIndex, markdownSearchMatches.length - 1) : -1;
   const targetLocale = otherLocale(activeLocale);
-  const isBusy = Boolean(saveAction) || isDeleting || isTranslating;
+  const isBusy = Boolean(saveAction) || isDeleting || isTranslating || Boolean(conversionAction);
+  const isFormatMutationPending = conversionAction === "convert" || conversionAction === "restore";
   const currentBaseline = useMemo(
     () =>
       serializeEditorState({
@@ -1263,7 +1655,23 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       }),
     [categorySlug, publishedAt, selectedTagSlugs, slug, status, translations]
   );
+  currentConversionContextRef.current = {
+    postId,
+    expectedUpdatedAt: postUpdatedAt,
+    locale: activeLocale,
+    editorBaseline: currentBaseline
+  };
   const isDirty = isDraftBaselineReady && currentBaseline !== savedBaseline;
+  const hasPendingFormatDependency =
+    isUploadingImageRef.current ||
+    isUploadingImage ||
+    articleImageUploadController.isUploading ||
+    isCreatingTag;
+  const formatChangeDisabledTitle = isDirty
+    ? conversionDirtyMessage()
+    : hasPendingFormatDependency
+      ? formatDependencyPendingMessage()
+      : undefined;
   useUnsavedArticleWarning(isDirty);
   const isNewArticleTiptapEnabled = isTiptapNewArticleEnabled();
   const isTiptapPublishGateEnabled = isTiptapPublishEnabled();
@@ -1272,7 +1680,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   const canChooseNewArticleFormat =
     !postId &&
     isNewArticleTiptapEnabled &&
-    !Object.values(translations).some(hasTranslationContent);
+    !Object.values(translations).some(hasTranslationBodyContent);
   const tiptapPublishDisabled = hasTiptapDraft && !isTiptapPublishGateEnabled;
   const publishDisabledTitle = tiptapPublishDisabled
     ? locale === "zh"
@@ -1316,6 +1724,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   return (
     <section className={`admin-editor${isFocusMode ? " is-focus-mode" : ""}`}>
       <form className="editor-shell" onSubmit={handleSubmit}>
+        <fieldset className="editor-form-fields" disabled={isFormatMutationPending}>
         <div className="editor-toolbar">
           <div>
             <p className="admin-kicker">Writing room</p>
@@ -1614,6 +2023,53 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                   onChooseFormat={chooseActiveLocaleFormat}
                 />
               ) : null}
+              {postId && !isActiveTiptap ? (
+                <div className="article-conversion-panel" aria-label="Article format conversion">
+                  <div>
+                    <strong>Markdown storage</strong>
+                    <p>Preview how the saved Markdown will become TipTap before changing this locale.</p>
+                    {isDirty ? (
+                      <span>{conversionDirtyMessage()}</span>
+                    ) : hasPendingFormatDependency ? (
+                      <span>{formatDependencyPendingMessage()}</span>
+                    ) : null}
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || isDirty || hasPendingFormatDependency}
+                    title={formatChangeDisabledTitle}
+                    onClick={() => void previewTiptapConversion(activeLocale)}
+                  >
+                    {conversionAction === "preview" ? "Previewing..." : "Preview TipTap conversion"}
+                  </button>
+                </div>
+              ) : null}
+              {postId && canRestoreActiveMarkdown ? (
+                <div className="article-conversion-panel article-conversion-panel--restore" aria-label="Article format conversion">
+                  <div>
+                    <strong>Markdown snapshot available</strong>
+                    <p>
+                      This locale can be restored to the exact Markdown captured before conversion
+                      {currentTranslation.restoreMarkdownSnapshotAt ? ` at ${currentTranslation.restoreMarkdownSnapshotAt}` : ""}.
+                    </p>
+                    {isDirty ? (
+                      <span>{conversionDirtyMessage()}</span>
+                    ) : hasPendingFormatDependency ? (
+                      <span>{formatDependencyPendingMessage()}</span>
+                    ) : null}
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || isDirty || hasPendingFormatDependency}
+                    title={formatChangeDisabledTitle}
+                    onClick={() => requestRestoreMarkdown(activeLocale)}
+                  >
+                    Restore Markdown snapshot
+                  </button>
+                </div>
+              ) : null}
               {!isActiveTiptap ? (
                 <>
                   <div className="markdown-mode-row" role="tablist" aria-label="Markdown editor mode">
@@ -1802,6 +2258,7 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
             </aside>
           ) : null}
         </div>
+        </fieldset>
       </form>
 
       {isDeleteDialogOpen ? (
@@ -1840,6 +2297,110 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
               </button>
               <button className="primary-button" type="button" disabled={isTranslating} onClick={() => void runTranslation(pendingTranslationTarget)}>
                 {isTranslating ? (locale === "zh" ? "翻译中..." : "Translating...") : locale === "zh" ? "继续翻译" : "Continue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {conversionPreview ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="confirm-dialog confirm-dialog--wide" role="dialog" aria-modal="true" aria-labelledby="conversion-preview-title">
+            <h2 id="conversion-preview-title">Convert Markdown to rich text?</h2>
+            <p>
+              This preview is based on the saved {languageLabel(conversionPreview.locale, locale)} Markdown. The server recomputes
+              the conversion when you confirm.
+            </p>
+            <div className="conversion-preview-summary">
+              <div>
+                <strong>Blockers</strong>
+                {conversionPreview.preview.blockers.length > 0 ? (
+                  <ul>
+                    {conversionPreview.preview.blockers.map((issue) => (
+                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span>No blockers found.</span>
+                )}
+              </div>
+              <div>
+                <strong>Warnings</strong>
+                {conversionPreview.preview.warnings.length > 0 ? (
+                  <ul>
+                    {conversionPreview.preview.warnings.map((issue) => (
+                      <li key={`${issue.code}-${issue.line}-${issue.message}`}>{formatConversionIssue(issue)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <span>No warnings found.</span>
+                )}
+              </div>
+            </div>
+            {status === "published" && !isTiptapPublishGateEnabled ? (
+              <p className="warning-text">
+                TipTap publishing is not enabled yet. Hide this post before converting a published locale.
+              </p>
+            ) : null}
+            {conversionPreview.preview.projectedMarkdown ? (
+              <div className="conversion-preview-markdown">
+                <strong>Projected Markdown after conversion</strong>
+                <MarkdownPreview markdown={conversionPreview.preview.projectedMarkdown} locale={locale} />
+              </div>
+            ) : null}
+            <div className="confirm-dialog__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={Boolean(conversionAction)}
+                onClick={() => setConversionPreview(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={
+                  Boolean(conversionAction) ||
+                  hasPendingFormatDependency ||
+                  !conversionPreview.preview.canConvert ||
+                  conversionPreview.preview.blockers.length > 0 ||
+                  (status === "published" && !isTiptapPublishGateEnabled)
+                }
+                onClick={() => void confirmTiptapConversion()}
+              >
+                {conversionAction === "convert" ? "Converting..." : "Convert to rich text"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingRestoreMarkdown ? (
+        <div className="modal-backdrop" role="presentation">
+          <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-markdown-title">
+            <h2 id="restore-markdown-title">Restore Markdown snapshot?</h2>
+            <p>
+              This replaces the {languageLabel(pendingRestoreMarkdown.locale, locale)} TipTap JSON with the exact Markdown snapshot
+              captured before conversion
+              {pendingRestoreMarkdown.snapshotAt ? ` at ${pendingRestoreMarkdown.snapshotAt}` : ""}.
+            </p>
+            <div className="confirm-dialog__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={Boolean(conversionAction)}
+                onClick={() => setPendingRestoreMarkdown(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={Boolean(conversionAction) || hasPendingFormatDependency}
+                onClick={() => void confirmRestoreMarkdown()}
+              >
+                {conversionAction === "restore" ? "Restoring..." : "Restore Markdown"}
               </button>
             </div>
           </div>

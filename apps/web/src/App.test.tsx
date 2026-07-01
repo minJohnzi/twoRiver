@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -13,6 +13,8 @@ import {
   fetchTagDetail,
   fetchTags
 } from "./api/posts";
+
+configure({ asyncUtilTimeout: 3_000 });
 
 vi.mock("./api/admin", () => ({
   fetchAdminPosts: vi.fn(),

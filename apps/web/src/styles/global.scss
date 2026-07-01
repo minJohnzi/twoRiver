@@ -1757,6 +1757,15 @@ button:focus-visible {
   gap: 26px;
 }
 
+.editor-form-fields {
+  display: grid;
+  min-inline-size: 0;
+  gap: inherit;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
 .action-notice {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
@@ -6777,6 +6786,80 @@ button.resource-detail__preview {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.article-conversion-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 16px;
+  background: rgba(14, 116, 144, 0.1);
+  padding: 14px;
+}
+
+.article-conversion-panel--restore {
+  border-color: rgba(250, 204, 21, 0.32);
+  background: rgba(161, 98, 7, 0.1);
+}
+
+.article-conversion-panel div {
+  display: grid;
+  gap: 5px;
+  min-width: min(100%, 360px);
+}
+
+.article-conversion-panel strong {
+  color: var(--color-heading);
+}
+
+.article-conversion-panel p,
+.article-conversion-panel span {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.confirm-dialog--wide {
+  width: min(920px, calc(100vw - 32px));
+}
+
+.conversion-preview-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.conversion-preview-summary > div,
+.conversion-preview-markdown {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.82);
+  padding: 12px;
+}
+
+.conversion-preview-summary ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.conversion-preview-summary span {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.conversion-preview-markdown {
+  max-height: 380px;
+  overflow: auto;
 }
 
 .article-editor-recovery {

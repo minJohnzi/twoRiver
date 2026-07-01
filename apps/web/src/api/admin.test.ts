@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiRequest } from "./client";
 import {
+  convertAdminPostTranslationToTiptap,
   detachAdminCategoryReferences,
   detachAdminTagReferences,
   deleteAdminResource,
   fetchAdminCategoryReferences,
   fetchAdminTagReferences,
   moveAdminResource,
+  previewAdminPostTiptapConversion,
+  restoreAdminPostTranslationMarkdown,
   uploadAdminAboutAvatar,
   uploadAdminPostImage,
   uploadAdminResource
@@ -67,6 +70,58 @@ describe("admin taxonomy API", () => {
     ]);
     expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBe(JSON.stringify({ postIds: [3] }));
     expect((fetchMock.mock.calls[3]?.[1] as RequestInit).body).toBe(JSON.stringify({ postIds: [3] }));
+  });
+});
+
+describe("admin article conversion API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("calls the dedicated TipTap preview, conversion, and restore endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            originalMarkdown: "# Title",
+            document: { type: "doc", content: [{ type: "paragraph" }] },
+            projectedMarkdown: "# Title\n",
+            canConvert: true,
+            blockers: [],
+            warnings: []
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ post: { id: 7, translations: [] } }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ post: { id: 7, translations: [] } }), {
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewAdminPostTiptapConversion(7, "en");
+    await convertAdminPostTranslationToTiptap(7, "en", { expectedUpdatedAt: "2026-06-10T00:00:00.000Z" });
+    await restoreAdminPostTranslationMarkdown(7, "en", { expectedUpdatedAt: "2026-06-11T00:00:00.000Z" });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/admin/posts/7/translations/en/tiptap-preview",
+      "/api/admin/posts/7/translations/en/convert-to-tiptap",
+      "/api/admin/posts/7/translations/en/restore-markdown"
+    ]);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe("POST");
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).body).toBe(
+      JSON.stringify({ expectedUpdatedAt: "2026-06-10T00:00:00.000Z" })
+    );
+    expect((fetchMock.mock.calls[2]?.[1] as RequestInit).body).toBe(
+      JSON.stringify({ expectedUpdatedAt: "2026-06-11T00:00:00.000Z" })
+    );
   });
 });
 

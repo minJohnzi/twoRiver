@@ -1,17 +1,20 @@
 import "@testing-library/jest-dom/vitest";
 import type { ArticleDocument } from "@tworiver/content-engine/browser";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PublicPost } from "@tworiver/shared";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAdminTag,
   createAdminPost,
+  convertAdminPostTranslationToTiptap,
   deleteAdminPost,
   fetchAdminCategories,
   fetchAdminTags,
   fetchAdminPosts,
   fetchAdminPost,
+  previewAdminPostTiptapConversion,
+  restoreAdminPostTranslationMarkdown,
   translateAdminPostDraft,
   updateAdminPost,
   uploadAdminPostImage
@@ -22,11 +25,14 @@ import { AdminEditorPage } from "./AdminEditorPage";
 vi.mock("../api/admin", () => ({
   createAdminTag: vi.fn(),
   createAdminPost: vi.fn(),
+  convertAdminPostTranslationToTiptap: vi.fn(),
   deleteAdminPost: vi.fn(),
   fetchAdminCategories: vi.fn(),
   fetchAdminTags: vi.fn(),
   fetchAdminPosts: vi.fn(),
   fetchAdminPost: vi.fn(),
+  previewAdminPostTiptapConversion: vi.fn(),
+  restoreAdminPostTranslationMarkdown: vi.fn(),
   translateAdminPostDraft: vi.fn(),
   updateAdminPost: vi.fn(),
   uploadAdminPostImage: vi.fn()
@@ -34,14 +40,35 @@ vi.mock("../api/admin", () => ({
 
 const mockedCreateAdminTag = vi.mocked(createAdminTag);
 const mockedCreateAdminPost = vi.mocked(createAdminPost);
+const mockedConvertAdminPostTranslationToTiptap = vi.mocked(convertAdminPostTranslationToTiptap);
 const mockedDeleteAdminPost = vi.mocked(deleteAdminPost);
 const mockedFetchAdminCategories = vi.mocked(fetchAdminCategories);
 const mockedFetchAdminTags = vi.mocked(fetchAdminTags);
 const mockedFetchAdminPosts = vi.mocked(fetchAdminPosts);
 const mockedFetchAdminPost = vi.mocked(fetchAdminPost);
+const mockedPreviewAdminPostTiptapConversion = vi.mocked(previewAdminPostTiptapConversion);
+const mockedRestoreAdminPostTranslationMarkdown = vi.mocked(restoreAdminPostTranslationMarkdown);
 const mockedTranslateAdminPostDraft = vi.mocked(translateAdminPostDraft);
 const mockedUpdateAdminPost = vi.mocked(updateAdminPost);
 const mockedUploadAdminPostImage = vi.mocked(uploadAdminPostImage);
+
+function resetAdminEditorApiMocks() {
+  [
+    mockedCreateAdminTag,
+    mockedCreateAdminPost,
+    mockedConvertAdminPostTranslationToTiptap,
+    mockedDeleteAdminPost,
+    mockedFetchAdminCategories,
+    mockedFetchAdminTags,
+    mockedFetchAdminPosts,
+    mockedFetchAdminPost,
+    mockedPreviewAdminPostTiptapConversion,
+    mockedRestoreAdminPostTranslationMarkdown,
+    mockedTranslateAdminPostDraft,
+    mockedUpdateAdminPost,
+    mockedUploadAdminPostImage
+  ].forEach((mock) => mock.mockClear());
+}
 
 function emptyClientRects(): DOMRectList {
   return {
@@ -135,11 +162,42 @@ function makeTiptapPost(overrides: Partial<PublicPost> = {}): PublicPost {
   });
 }
 
+function makeSecondMarkdownPost(): PublicPost {
+  return makePost({
+    id: 2,
+    uid: "p_22222222-2222-4222-8222-222222222222",
+    slug: "second-post",
+    updatedAt: "2026-06-20T00:00:00.000Z",
+    translations: [
+      {
+        locale: "en",
+        title: "Second post",
+        summary: "",
+        contentMarkdown: "Second article body",
+        content: { format: "markdown", markdown: "Second article body" },
+        seoTitle: null,
+        seoDescription: null
+      }
+    ]
+  });
+}
+
 function renderEditor(route: string, locale: "zh" | "en" = "en") {
   return render(
     <MemoryRouter initialEntries={[route]}>
       <Routes>
         <Route path="/admin/posts/new" element={<AdminEditorPage locale={locale} />} />
+        <Route path="/admin/posts/:id" element={<AdminEditorPage locale={locale} />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+function renderEditorWithArticleSwitch(route: string, targetPostId: number, locale: "zh" | "en" = "en") {
+  return render(
+    <MemoryRouter initialEntries={[route]}>
+      <Link to={`/admin/posts/${targetPostId}`}>Open article {targetPostId}</Link>
+      <Routes>
         <Route path="/admin/posts/:id" element={<AdminEditorPage locale={locale} />} />
       </Routes>
     </MemoryRouter>
@@ -270,7 +328,7 @@ describe("admin editor image uploads", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    resetAdminEditorApiMocks();
     vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "false");
     vi.stubEnv("VITE_TIPTAP_PUBLISH_ENABLED", "false");
     mockedFetchAdminCategories.mockResolvedValue({ categories: [] });
@@ -286,6 +344,16 @@ describe("admin editor image uploads", () => {
     mockedCreateAdminPost.mockResolvedValue({ post: makePost() });
     mockedUpdateAdminPost.mockResolvedValue({ post: makePost() });
     mockedDeleteAdminPost.mockResolvedValue({ ok: true });
+    mockedPreviewAdminPostTiptapConversion.mockResolvedValue({
+      originalMarkdown: "Hello world",
+      document: tiptapDocument,
+      projectedMarkdown: "TipTap body\n",
+      canConvert: true,
+      blockers: [],
+      warnings: []
+    });
+    mockedConvertAdminPostTranslationToTiptap.mockResolvedValue({ post: makeTiptapPost() });
+    mockedRestoreAdminPostTranslationMarkdown.mockResolvedValue({ post: makePost() });
     mockedTranslateAdminPostDraft.mockResolvedValue({
       translation: {
         locale: "zh",
@@ -544,6 +612,586 @@ describe("admin editor image uploads", () => {
 
     expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+  });
+
+  it("keeps the new article format chooser after title-only edits and allows switching back before body text", async () => {
+    vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
+    renderEditor("/admin/posts/new");
+
+    expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Title first" } });
+
+    expect(screen.getByRole("button", { name: "Use rich text" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Title first")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Use Markdown/ }));
+
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue("");
+    expect(screen.queryByRole("textbox", { name: "Article body" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      structure: "an empty code block",
+      insert: () => fireEvent.change(screen.getByLabelText("Code block language"), { target: { value: "ts" } })
+    },
+    {
+      structure: "a horizontal rule",
+      insert: () => fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }))
+    }
+  ])("locks the new article format after adding $structure", async ({ insert }) => {
+    vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
+    renderEditor("/admin/posts/new");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use rich text" }));
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+
+    insert();
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /Use Markdown/ })).not.toBeInTheDocument());
+  });
+
+  it("treats a TipTap image without alt text as body content when validating translations", async () => {
+    const imageOnlyDocument: ArticleDocument = {
+      type: "doc",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "/uploads/images/posts/p_11111111-1111-4111-8111-111111111111/diagram.png",
+            alt: null,
+            title: null
+          }
+        }
+      ]
+    };
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makePost({
+        translations: [
+          {
+            locale: "en",
+            title: "Fallback",
+            summary: "",
+            contentMarkdown: "Fallback body",
+            content: { format: "markdown", markdown: "Fallback body" },
+            seoTitle: null,
+            seoDescription: null
+          },
+          {
+            locale: "zh",
+            title: "",
+            summary: "",
+            contentMarkdown: "",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: imageOnlyDocument
+            },
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue("Fallback body");
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(await screen.findByRole("alert", { name: "Post action error" })).toHaveTextContent(
+      "Every language version with content needs a title."
+    );
+    expect(mockedUpdateAdminPost).not.toHaveBeenCalled();
+  });
+
+  it("previews and converts saved Markdown through the dedicated TipTap conversion route", async () => {
+    const originalUpdatedAt = "2026-06-10T00:00:00.000Z";
+    const convertedPost = makeTiptapPost({ updatedAt: "2026-06-12T00:00:00.000Z" });
+    mockedFetchAdminPost.mockResolvedValue({ post: makePost({ updatedAt: originalUpdatedAt }) });
+    mockedPreviewAdminPostTiptapConversion.mockResolvedValue({
+      originalMarkdown: "Hello world",
+      document: tiptapDocument,
+      projectedMarkdown: "# Preview heading\n\nTipTap body\n",
+      canConvert: true,
+      blockers: [],
+      warnings: [{ code: "normalized-markdown", line: 1, message: "Markdown spacing will be normalized." }]
+    });
+    mockedConvertAdminPostTranslationToTiptap.mockResolvedValue({ post: convertedPost });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await loadedMarkdownTextarea()).toHaveValue("Hello world");
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" });
+    expect(mockedPreviewAdminPostTiptapConversion).toHaveBeenCalledWith(1, "en");
+    expect(within(dialog).getByText("Line 1: Markdown spacing will be normalized.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert to rich text" }));
+
+    await waitFor(() =>
+      expect(mockedConvertAdminPostTranslationToTiptap).toHaveBeenCalledWith(1, "en", {
+        expectedUpdatedAt: originalUpdatedAt
+      })
+    );
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
+  });
+
+  it("ignores a conversion preview response after navigating to another article", async () => {
+    const secondPost = makeSecondMarkdownPost();
+    let resolvePreview: ((value: Awaited<ReturnType<typeof previewAdminPostTiptapConversion>>) => void) | undefined;
+    mockedFetchAdminPost.mockImplementation(async (postId) => ({ post: postId === 1 ? makePost() : secondPost }));
+    mockedPreviewAdminPostTiptapConversion.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve;
+        })
+    );
+
+    renderEditorWithArticleSwitch("/admin/posts/1", 2);
+
+    expect(await loadedMarkdownTextarea()).toHaveValue("Hello world");
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+    await waitFor(() => expect(mockedPreviewAdminPostTiptapConversion).toHaveBeenCalledWith(1, "en"));
+    fireEvent.click(screen.getByRole("link", { name: "Open article 2" }));
+
+    expect(await loadedMarkdownTextarea()).toHaveValue("Second article body");
+    await act(async () => {
+      resolvePreview?.({
+        originalMarkdown: "Hello world",
+        document: tiptapDocument,
+        projectedMarkdown: "TipTap body\n",
+        canConvert: true,
+        blockers: [],
+        warnings: []
+      });
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Convert Markdown to rich text?" })).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Slug")).toHaveValue("second-post");
+    expect(screen.queryByText("Previewing rich text conversion")).not.toBeInTheDocument();
+    expect(screen.queryByText("Conversion preview ready")).not.toBeInTheDocument();
+  });
+
+  it("does not confirm a conversion after the active locale changes behind the preview", async () => {
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+    const dialog = await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" });
+    const languageButtons = within(screen.getByRole("tablist", { name: "Editor language" })).getAllByRole("button");
+    fireEvent.click(languageButtons[0]!);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Convert to rich text" }));
+
+    expect(mockedConvertAdminPostTranslationToTiptap).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Convert Markdown to rich text?" })).not.toBeInTheDocument();
+  });
+
+  it("blocks format operations while a Markdown image upload is pending", async () => {
+    mockedUploadAdminPostImage.mockImplementation(() => new Promise(() => undefined));
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.change(screen.getByLabelText("Upload image file"), { target: { files: [imageFile()] } });
+    await waitFor(() => expect(mockedUploadAdminPostImage).toHaveBeenCalled());
+
+    const previewButton = screen.getByRole("button", { name: "Preview TipTap conversion" });
+    expect(previewButton).toBeDisabled();
+    fireEvent.click(previewButton);
+    expect(mockedPreviewAdminPostTiptapConversion).not.toHaveBeenCalled();
+  });
+
+  it("blocks format operations while a quick tag is being created", async () => {
+    mockedCreateAdminTag.mockImplementation(() => new Promise(() => undefined));
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.change(screen.getByLabelText("New tag name"), { target: { value: "Pending Tag" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create and select tag" }));
+    await waitFor(() => expect(mockedCreateAdminTag).toHaveBeenCalled());
+
+    const previewButton = screen.getByRole("button", { name: "Preview TipTap conversion" });
+    expect(previewButton).toBeDisabled();
+    fireEvent.click(previewButton);
+    expect(mockedPreviewAdminPostTiptapConversion).not.toHaveBeenCalled();
+  });
+
+  it("keeps local edits and rejects a preview response when the editor baseline changes", async () => {
+    let resolvePreview: ((value: Awaited<ReturnType<typeof previewAdminPostTiptapConversion>>) => void) | undefined;
+    mockedPreviewAdminPostTiptapConversion.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePreview = resolve;
+        })
+    );
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+    await waitFor(() => expect(mockedPreviewAdminPostTiptapConversion).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Unsaved local title" } });
+    await act(async () => {
+      resolvePreview?.({
+        originalMarkdown: "Hello world",
+        document: tiptapDocument,
+        projectedMarkdown: "TipTap body\n",
+        canConvert: true,
+        blockers: [],
+        warnings: []
+      });
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Convert Markdown to rich text?" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Title")).toHaveValue("Unsaved local title");
+    expect(screen.getByRole("alert", { name: "Post action error" })).toHaveTextContent(
+      "Local edits changed while the format request was running. Your edits were kept; reload before retrying."
+    );
+  });
+
+  it("locks every mutable form control during conversion and ignores the old response after navigation", async () => {
+    const originalPost = makePost();
+    const secondPost = makeSecondMarkdownPost();
+    let resolveConversion: ((value: Awaited<ReturnType<typeof convertAdminPostTranslationToTiptap>>) => void) | undefined;
+    mockedFetchAdminPost.mockImplementation(async (postId) => ({ post: postId === 1 ? originalPost : secondPost }));
+    mockedConvertAdminPostTranslationToTiptap.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveConversion = resolve;
+        })
+    );
+
+    renderEditorWithArticleSwitch("/admin/posts/1", 2);
+
+    expect(await loadedMarkdownTextarea()).toHaveValue("Hello world");
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" })).getByRole("button", {
+        name: "Convert to rich text"
+      })
+    );
+    await waitFor(() => expect(mockedConvertAdminPostTranslationToTiptap).toHaveBeenCalled());
+
+    for (const control of ["Slug", "Category", "Search tags", "Title", "Summary", "Markdown body", "Upload image file"]) {
+      expect(screen.getByLabelText(control)).toBeDisabled();
+    }
+    for (const languageButton of within(screen.getByRole("tablist", { name: "Editor language" })).getAllByRole("button")) {
+      expect(languageButton).toBeDisabled();
+    }
+
+    fireEvent.click(screen.getByRole("link", { name: "Open article 2" }));
+    expect(await loadedMarkdownTextarea()).toHaveValue("Second article body");
+    await act(async () => {
+      resolveConversion?.({ post: makeTiptapPost({ updatedAt: "2026-06-21T00:00:00.000Z" }) });
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Slug")).toHaveValue("second-post"));
+    expect(screen.getByLabelText("Markdown body")).toHaveValue("Second article body");
+    expect(screen.queryByRole("textbox", { name: "Article body" })).not.toBeInTheDocument();
+  });
+
+  it("shows conversion blockers and disables confirmation when Markdown cannot be converted", async () => {
+    mockedPreviewAdminPostTiptapConversion.mockResolvedValue({
+      originalMarkdown: "# Tasks\n\n- [ ] unsafe task",
+      document: null,
+      projectedMarkdown: null,
+      canConvert: false,
+      blockers: [{ code: "task-list", line: 3, message: "Task lists are not supported in article v1." }],
+      warnings: []
+    });
+
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" });
+    expect(within(dialog).getByText("Line 3: Task lists are not supported in article v1.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Convert to rich text" })).toBeDisabled();
+    expect(mockedConvertAdminPostTranslationToTiptap).not.toHaveBeenCalled();
+  });
+
+  it("requires saving local Markdown edits before previewing a conversion", async () => {
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Unsaved title" } });
+
+    expect(screen.getByRole("button", { name: "Preview TipTap conversion" })).toBeDisabled();
+    expect(screen.getByText("Save or reload your current edits before changing the article format.")).toBeInTheDocument();
+    expect(mockedPreviewAdminPostTiptapConversion).not.toHaveBeenCalled();
+  });
+
+  it("does not allow converting a published Markdown post while TipTap publishing is disabled", async () => {
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makePost({ status: "published", publishedAt: "2026-06-10T00:00:00.000Z" })
+    });
+    mockedPreviewAdminPostTiptapConversion.mockResolvedValue({
+      originalMarkdown: "Hello world",
+      document: tiptapDocument,
+      projectedMarkdown: "TipTap body\n",
+      canConvert: true,
+      blockers: [],
+      warnings: []
+    });
+
+    renderEditor("/admin/posts/1");
+
+    await loadedMarkdownTextarea();
+    fireEvent.click(screen.getByRole("button", { name: "Preview TipTap conversion" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Convert Markdown to rich text?" });
+    expect(within(dialog).getByText("TipTap publishing is not enabled yet. Hide this post before converting a published locale.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Convert to rich text" })).toBeDisabled();
+    expect(mockedConvertAdminPostTranslationToTiptap).not.toHaveBeenCalled();
+  });
+
+  it("restores a converted TipTap locale from its Markdown snapshot", async () => {
+    const originalUpdatedAt = "2026-06-10T00:00:00.000Z";
+    const snapshotAt = "2026-06-11T00:00:00.000Z";
+    const markdownSnapshot = "# Original Markdown\n\nBody";
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makeTiptapPost({
+        updatedAt: originalUpdatedAt,
+        translations: [
+          {
+            locale: "zh",
+            title: "涓枃鑽夌",
+            summary: "",
+            contentMarkdown: "涓枃 Markdown",
+            content: { format: "markdown", markdown: "涓枃 Markdown" },
+            seoTitle: null,
+            seoDescription: null
+          },
+          {
+            locale: "en",
+            title: "TipTap Draft",
+            summary: "",
+            contentMarkdown: "TipTap body\n",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: tiptapDocument
+            },
+            canRestoreMarkdown: true,
+            restoreMarkdownSnapshotAt: snapshotAt,
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+    mockedRestoreAdminPostTranslationMarkdown.mockResolvedValue({
+      post: makePost({
+        updatedAt: "2026-06-12T00:00:00.000Z",
+        translations: [
+          {
+            locale: "zh",
+            title: "涓枃鑽夌",
+            summary: "",
+            contentMarkdown: "涓枃 Markdown",
+            content: { format: "markdown", markdown: "涓枃 Markdown" },
+            seoTitle: null,
+            seoDescription: null
+          },
+          {
+            locale: "en",
+            title: "TipTap Draft",
+            summary: "",
+            contentMarkdown: markdownSnapshot,
+            content: { format: "markdown", markdown: markdownSnapshot },
+            canRestoreMarkdown: false,
+            restoreMarkdownSnapshotAt: null,
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toHaveTextContent("TipTap body");
+    fireEvent.click(screen.getByRole("button", { name: "Restore Markdown snapshot" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" })).getByRole("button", { name: "Restore Markdown" }));
+
+    await waitFor(() =>
+      expect(mockedRestoreAdminPostTranslationMarkdown).toHaveBeenCalledWith(1, "en", {
+        expectedUpdatedAt: originalUpdatedAt
+      })
+    );
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue(markdownSnapshot);
+    expect(screen.queryByRole("textbox", { name: "Article body" })).not.toBeInTheDocument();
+  });
+
+  it("restores a Markdown snapshot even when the stored TipTap JSON is invalid", async () => {
+    const originalUpdatedAt = "2026-06-10T00:00:00.000Z";
+    const markdownSnapshot = "# Recovered Markdown\n\nBody";
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makeTiptapPost({
+        updatedAt: originalUpdatedAt,
+        translations: [
+          {
+            locale: "en",
+            title: "Broken rich text",
+            summary: "",
+            contentMarkdown: markdownSnapshot,
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: { type: "doc", content: [{ type: "unsupportedNode" }] }
+            },
+            canRestoreMarkdown: true,
+            restoreMarkdownSnapshotAt: "2026-06-09T00:00:00.000Z",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+    mockedRestoreAdminPostTranslationMarkdown.mockResolvedValue({
+      post: makePost({
+        updatedAt: "2026-06-11T00:00:00.000Z",
+        translations: [
+          {
+            locale: "en",
+            title: "Recovered article",
+            summary: "",
+            contentMarkdown: markdownSnapshot,
+            content: { format: "markdown", markdown: markdownSnapshot },
+            canRestoreMarkdown: false,
+            restoreMarkdownSnapshotAt: null,
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Rich text body could not be loaded");
+    fireEvent.click(screen.getByRole("button", { name: "Restore Markdown snapshot" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" })).getByRole("button", {
+        name: "Restore Markdown"
+      })
+    );
+
+    await waitFor(() =>
+      expect(mockedRestoreAdminPostTranslationMarkdown).toHaveBeenCalledWith(1, "en", {
+        expectedUpdatedAt: originalUpdatedAt
+      })
+    );
+    expect(await screen.findByLabelText("Markdown body")).toHaveValue(markdownSnapshot);
+  });
+
+  it("disables Markdown snapshot restore while TipTap changes are unsaved", async () => {
+    mockedFetchAdminPost.mockResolvedValue({
+      post: makeTiptapPost({
+        translations: [
+          {
+            locale: "en",
+            title: "TipTap Draft",
+            summary: "",
+            contentMarkdown: "TipTap body\n",
+            content: {
+              format: "tiptap",
+              schemaVersion: 1,
+              doc: tiptapDocument
+            },
+            canRestoreMarkdown: true,
+            restoreMarkdownSnapshotAt: "2026-06-09T00:00:00.000Z",
+            seoTitle: null,
+            seoDescription: null
+          }
+        ]
+      })
+    });
+
+    renderEditor("/admin/posts/1");
+
+    expect(await screen.findByRole("textbox", { name: "Article body" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Horizontal rule" }));
+
+    const restoreButton = screen.getByRole("button", { name: "Restore Markdown snapshot" });
+    await waitFor(() => expect(restoreButton).toBeDisabled());
+    fireEvent.click(restoreButton);
+    expect(mockedRestoreAdminPostTranslationMarkdown).not.toHaveBeenCalled();
+  });
+
+  it("locks the form during restore and ignores the old restore response after navigation", async () => {
+    const originalPost = makeTiptapPost({
+      translations: [
+        {
+          locale: "en",
+          title: "TipTap Draft",
+          summary: "",
+          contentMarkdown: "TipTap body\n",
+          content: { format: "tiptap", schemaVersion: 1, doc: tiptapDocument },
+          canRestoreMarkdown: true,
+          restoreMarkdownSnapshotAt: "2026-06-09T00:00:00.000Z",
+          seoTitle: null,
+          seoDescription: null
+        }
+      ]
+    });
+    const secondPost = makeSecondMarkdownPost();
+    let resolveRestore: ((value: Awaited<ReturnType<typeof restoreAdminPostTranslationMarkdown>>) => void) | undefined;
+    mockedFetchAdminPost.mockImplementation(async (postId) => ({ post: postId === 1 ? originalPost : secondPost }));
+    mockedRestoreAdminPostTranslationMarkdown.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRestore = resolve;
+        })
+    );
+
+    renderEditorWithArticleSwitch("/admin/posts/1", 2);
+
+    const articleBody = await screen.findByRole("textbox", { name: "Article body" });
+    fireEvent.click(screen.getByRole("button", { name: "Restore Markdown snapshot" }));
+    fireEvent.click(
+      within(await screen.findByRole("dialog", { name: "Restore Markdown snapshot?" })).getByRole("button", {
+        name: "Restore Markdown"
+      })
+    );
+    await waitFor(() => expect(mockedRestoreAdminPostTranslationMarkdown).toHaveBeenCalled());
+
+    expect(screen.getByLabelText("Slug")).toBeDisabled();
+    expect(screen.getByLabelText("Title")).toBeDisabled();
+    expect(screen.getByLabelText("Category")).toBeDisabled();
+    expect(articleBody).toHaveAttribute("contenteditable", "false");
+    for (const languageButton of within(screen.getByRole("tablist", { name: "Editor language" })).getAllByRole("button")) {
+      expect(languageButton).toBeDisabled();
+    }
+
+    fireEvent.click(screen.getByRole("link", { name: "Open article 2" }));
+    expect(await loadedMarkdownTextarea()).toHaveValue("Second article body");
+    await act(async () => {
+      resolveRestore?.({
+        post: makePost({
+          updatedAt: "2026-06-21T00:00:00.000Z",
+          translations: [
+            {
+              locale: "en",
+              title: "Restored first post",
+              summary: "",
+              contentMarkdown: "First article snapshot",
+              content: { format: "markdown", markdown: "First article snapshot" },
+              seoTitle: null,
+              seoDescription: null
+            }
+          ]
+        })
+      });
+    });
+
+    await waitFor(() => expect(screen.getByLabelText("Slug")).toHaveValue("second-post"));
+    expect(screen.getByLabelText("Markdown body")).toHaveValue("Second article body");
   });
 
   it("warns on unsaved TipTap changes and clears the warning after a successful save baseline", async () => {

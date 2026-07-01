@@ -2,10 +2,12 @@ import type {
   AboutProfile,
   BulkPostActionInput,
   Category,
+  ConvertArticleContentInput,
   CreateCategoryInput,
   CreateTagInput,
   DetachTaxonomyInput,
   Locale,
+  MarkdownConversionPreview,
   PostLifecycleInput,
   PostTranslation,
   PublicPost,
@@ -57,6 +59,34 @@ export function createAdminPost(input: UpsertPostInput) {
 export function updateAdminPost(id: number, input: UpsertPostInput) {
   return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${id}`, {
     method: "PUT",
+    body: JSON.stringify(input)
+  });
+}
+
+export function previewAdminPostTiptapConversion(postId: number, locale: Locale) {
+  return apiRequest<MarkdownConversionPreview>(`/api/admin/posts/${postId}/translations/${locale}/tiptap-preview`, {
+    method: "POST"
+  });
+}
+
+export function convertAdminPostTranslationToTiptap(
+  postId: number,
+  locale: Locale,
+  input: ConvertArticleContentInput
+) {
+  return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${postId}/translations/${locale}/convert-to-tiptap`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function restoreAdminPostTranslationMarkdown(
+  postId: number,
+  locale: Locale,
+  input: ConvertArticleContentInput
+) {
+  return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${postId}/translations/${locale}/restore-markdown`, {
+    method: "POST",
     body: JSON.stringify(input)
   });
 }
