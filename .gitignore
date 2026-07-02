@@ -15,6 +15,7 @@ apps/web/.vite/
 .quality_gate/
 .superpowers/
 docs/superpowers/
+.claude/
 
 # Environment and secrets
 .env
