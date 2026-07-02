@@ -25,6 +25,7 @@
     "fastify": "^5.3.3",
     "fastify-plugin": "^5.0.1",
     "tar": "^7.5.19",
+    "ztrans": "file:../../vendor/ztrans-0.1.0.tgz",
     "zod": "^3.25.56"
   },
   "devDependencies": {

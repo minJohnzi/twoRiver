@@ -17,6 +17,7 @@ import { adminResourceRoutes } from "./routes/adminResourceRoutes.js";
 import { adminSiteSettingsRoutes } from "./routes/adminSiteSettingsRoutes.js";
 import { adminSystemRoutes } from "./routes/adminSystemRoutes.js";
 import { adminTagRoutes } from "./routes/adminTagRoutes.js";
+import { adminTranslationRoutes } from "./routes/adminTranslationRoutes.js";
 import { adminUploadRoutes } from "./routes/adminUploadRoutes.js";
 import { analyticsRoutes } from "./routes/analyticsRoutes.js";
 import { authRoutes } from "./routes/authRoutes.js";
@@ -134,6 +135,7 @@ export function buildApp({ config, db }: BuildAppOptions) {
   app.register(adminSystemRoutes, { config, rootApp: app });
   app.register(adminUploadRoutes, { config });
   app.register(adminTagRoutes);
+  app.register(adminTranslationRoutes, { config });
 
   app.get("/api/health", async () => ({
     ok: true,

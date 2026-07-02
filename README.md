@@ -21,6 +21,8 @@ TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前
 - **共享包：** TypeScript schema 和推导类型
 - **测试：** Vitest、Testing Library、jsdom
 
+API 使用来自 `vendor/ztrans-0.1.0.tgz` 的已提交包工件消费 `ztrans`，因此安装时不需要 sibling `ztrans` 检出。
+
 ## 仓库结构
 
 ```text
@@ -35,6 +37,7 @@ TwoRiver Blog 是一个极简的中英双语技术博客。它由 React/Vite 前
 |   |-- operations.md # 日常运维、备份和恢复
 |   `-- checklist.md  # 手动 QA 清单
 |-- scripts/          # 服务器部署和更新脚本
+|-- vendor/           # 已提交第三方包工件
 |-- .env.example
 |-- package.json
 `-- pnpm-workspace.yaml
@@ -93,6 +96,7 @@ pnpm dev
 | `CORS_ALLOWED_ORIGINS` | 生产环境可信浏览器来源，逗号分隔 | `https://example.me,https://www.example.me` |
 | `DEEPSEEK_API_KEY` | 可选 AI 辅助服务 API Key | 空 |
 | `DEEPSEEK_BASE_URL` | DeepSeek 兼容 API Base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | DeepSeek 兼容模型名称 | `deepseek-chat` |
 | `VITE_API_BASE_URL` | 前端 API Base URL；留空时使用同源请求 | 空（推荐） |
 
 生产环境启动时会拒绝默认的 `SESSION_SECRET` 和 `ADMIN_PASSWORD`，部署前必须替换。生产环境也要求配置 `CORS_ALLOWED_ORIGINS`。

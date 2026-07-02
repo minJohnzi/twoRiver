@@ -13,6 +13,8 @@ import type {
   PublicPost,
   Tag,
   TaxonomyReference,
+  TranslationDraftInput,
+  TranslationDraftResponse,
   UpdateCategoryInput,
   UpdateTagInput,
   UpsertAboutProfileInput,
@@ -75,6 +77,13 @@ export function convertAdminPostTranslationToTiptap(
   input: ConvertArticleContentInput
 ) {
   return apiRequest<{ post: PublicPost }>(`/api/admin/posts/${postId}/translations/${locale}/convert-to-tiptap`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function translateAdminPostDraft(input: TranslationDraftInput) {
+  return apiRequest<TranslationDraftResponse>("/api/admin/posts/translate-draft", {
     method: "POST",
     body: JSON.stringify(input)
   });
@@ -158,23 +167,6 @@ export function deleteAdminResource(url: string) {
   return apiRequest<{ ok: true }>("/api/admin/resources", {
     method: "DELETE",
     body: JSON.stringify({ url })
-  });
-}
-
-export interface TranslatePostDraftInput {
-  source: Pick<PostTranslation, "locale" | "title" | "summary" | "content" | "contentMarkdown">;
-  targetLocale: Locale;
-}
-
-export interface TranslatePostDraftResponse {
-  translation: PostTranslation;
-  warnings: string[];
-}
-
-export function translateAdminPostDraft(input: TranslatePostDraftInput) {
-  return apiRequest<TranslatePostDraftResponse>("/api/admin/posts/translate-draft", {
-    method: "POST",
-    body: JSON.stringify(input)
   });
 }
 

@@ -352,3 +352,41 @@ export const LoginInputSchema = z.object({
   password: z.string().min(1)
 });
 export type LoginInput = z.infer<typeof LoginInputSchema>;
+
+export const TranslationChunkSchema = z.object({
+  index: z.number().int().nonnegative(),
+  inputChars: z.number().int().nonnegative(),
+  outputChars: z.number().int().nonnegative(),
+  warnings: z.array(z.string())
+});
+export type TranslationChunk = z.infer<typeof TranslationChunkSchema>;
+
+export const TranslationDraftSourceSchema = z.object({
+  locale: LocaleSchema,
+  title: z.string(),
+  summary: z.string().default(""),
+  contentMarkdown: z.string().default(""),
+  seoTitle: z.string().nullable().default(null),
+  seoDescription: z.string().nullable().default(null)
+}).strict();
+export type TranslationDraftSource = z.infer<typeof TranslationDraftSourceSchema>;
+
+export const TranslationDraftInputSchema = z.object({
+  source: TranslationDraftSourceSchema,
+  targetLocale: LocaleSchema
+}).strict();
+export type TranslationDraftInput = z.infer<typeof TranslationDraftInputSchema>;
+
+export const TranslationDraftResponseSchema = z.object({
+  translation: z.object({
+    locale: LocaleSchema,
+    title: z.string(),
+    summary: z.string(),
+    contentMarkdown: z.string(),
+    seoTitle: z.string().nullable(),
+    seoDescription: z.string().nullable()
+  }),
+  warnings: z.array(z.string()),
+  chunks: z.array(TranslationChunkSchema)
+});
+export type TranslationDraftResponse = z.infer<typeof TranslationDraftResponseSchema>;
