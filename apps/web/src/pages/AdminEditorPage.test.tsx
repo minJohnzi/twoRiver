@@ -367,7 +367,8 @@ describe("admin editor image uploads", () => {
         seoTitle: null,
         seoDescription: null
       },
-      warnings: []
+      warnings: [],
+      chunks: []
     });
     mockedUploadAdminPostImage.mockResolvedValue({
       url: "/uploads/images/posts/p_11111111-1111-4111-8111-111111111111/photo.png",
@@ -1600,7 +1601,8 @@ describe("admin editor image uploads", () => {
         seoTitle: null,
         seoDescription: null
       },
-      warnings: ["review markdown"]
+      warnings: ["review markdown"],
+      chunks: []
     });
     renderEditor("/admin/posts/1");
 
@@ -1615,7 +1617,9 @@ describe("admin editor image uploads", () => {
           title: "Draft",
           summary: "",
           content: { format: "markdown", markdown: "Hello world" },
-          contentMarkdown: "Hello world"
+          contentMarkdown: "Hello world",
+          seoTitle: null,
+          seoDescription: null
         },
         targetLocale: "zh"
       })
@@ -1652,7 +1656,8 @@ describe("admin editor image uploads", () => {
         seoTitle: null,
         seoDescription: null
       },
-      warnings: []
+      warnings: [],
+      chunks: []
     });
 
     expect(await screen.findByDisplayValue("自动填入标题")).toBeInTheDocument();
@@ -1711,7 +1716,7 @@ describe("admin editor image uploads", () => {
         title: "中文 TipTap 草稿",
         summary: "结构保持翻译",
         content: {
-          format: "tiptap",
+          format: "tiptap" as const,
           schemaVersion: 1,
           doc: translatedZhDocument
         },
@@ -1719,7 +1724,8 @@ describe("admin editor image uploads", () => {
         seoTitle: null,
         seoDescription: null
       },
-      warnings: []
+      warnings: [],
+      chunks: []
     });
 
     renderEditor("/admin/posts/1");
@@ -1740,7 +1746,9 @@ describe("admin editor image uploads", () => {
             schemaVersion: 1,
             doc: tiptapDocument
           },
-          contentMarkdown: "TipTap body\n"
+          contentMarkdown: "TipTap body\n",
+          seoTitle: null,
+          seoDescription: null
         },
         targetLocale: "zh"
       })

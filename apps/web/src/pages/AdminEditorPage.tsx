@@ -1472,14 +1472,16 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           title: source.title,
           summary: source.summary,
           content: source.content,
-          contentMarkdown: source.contentMarkdown
+          contentMarkdown: source.contentMarkdown,
+          seoTitle: null,
+          seoDescription: null
         },
         targetLocale
       });
 
       setTranslations((current) => ({
         ...current,
-        [targetLocale]: translationDraftFromPost(translation)
+        [targetLocale]: translationDraftFromPost(translation as PostTranslation)
       }));
       setTiptapEditorErrors((current) => ({ ...current, [targetLocale]: undefined }));
       setActiveLocale(targetLocale);

@@ -35,7 +35,7 @@ export async function translatePostDraft(
       provider: {
         apiKey: config.DEEPSEEK_API_KEY,
         baseUrl: config.DEEPSEEK_BASE_URL,
-        model: config.DEEPSEEK_MODEL,
+        model: config.DEEPSEEK_MODEL ?? "deepseek-chat",
         temperature: 0.2
       },
       glossary: DEFAULT_TRANSLATION_GLOSSARY,

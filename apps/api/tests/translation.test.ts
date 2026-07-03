@@ -3,28 +3,27 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
-import type { TranslationDraftResponse } from "@tworiver/shared";
 import type { AppConfig } from "../src/config.js";
 import { buildApp } from "../src/app.js";
 import { openDatabase } from "../src/db/connection.js";
 import { migrate } from "../src/db/migrate.js";
 import { seedAdmin } from "../src/db/seedAdmin.js";
 import {
-  translatePostDraft,
-  TranslationProviderNotConfiguredError,
-  TranslationProviderRequestError
-} from "../src/services/ai/postTranslationService.js";
+  draftPostTranslation,
+  TranslationDraftContractError
+} from "../src/services/ai/translationDraftService.js";
+import { AiClientNotConfiguredError, AiProviderError } from "../src/services/ai/aiClient.js";
 
-vi.mock("../src/services/ai/postTranslationService.js", async (importActual) => {
-  const actual = await importActual<typeof import("../src/services/ai/postTranslationService.js")>();
+vi.mock("../src/services/ai/translationDraftService.js", async (importActual) => {
+  const actual = await importActual<typeof import("../src/services/ai/translationDraftService.js")>();
   return {
     ...actual,
-    translatePostDraft: vi.fn()
+    draftPostTranslation: vi.fn()
   };
 });
 
 const tempDirectories: string[] = [];
-const mockedTranslatePostDraft = vi.mocked(translatePostDraft);
+const mockedDraftPostTranslation = vi.mocked(draftPostTranslation);
 
 function makeConfig(databasePath: string): AppConfig {
   return {
@@ -89,12 +88,10 @@ function sourceDraft(locale: "zh" | "en" = "zh") {
     locale,
     title: locale === "zh" ? "TwoRiver zh weekly" : "TwoRiver Weekly",
     summary: locale === "zh" ? "Product progress in zh locale." : "This week's product progress.",
-    contentMarkdown:
-      locale === "zh"
-        ? "## Zh progress\n\nThe editor translation flow is ready in source locale."
-        : "## Progress\n\nThe editor translation flow is ready.",
-    seoTitle: locale === "zh" ? "TwoRiver zh weekly SEO" : "TwoRiver Weekly SEO",
-    seoDescription: locale === "zh" ? "TwoRiver product weekly in zh locale." : "TwoRiver product weekly."
+    content: { format: "markdown" as const, markdown: "## Body" },
+    contentMarkdown: "## Body",
+    seoTitle: null as string | null,
+    seoDescription: null as string | null
   };
 }
 
@@ -111,8 +108,21 @@ async function translateDraft(
   });
 }
 
+const makeTranslationResult = (overrides?: Partial<Awaited<ReturnType<typeof draftPostTranslation>>>) => ({
+  translation: {
+    locale: "en" as const,
+    title: "TwoRiver Weekly",
+    summary: "This week's product progress.",
+    contentMarkdown: "## Progress\n\nThe editor translation flow is ready.",
+    seoTitle: "TwoRiver Weekly SEO",
+    seoDescription: "TwoRiver product weekly."
+  },
+  warnings: [] as string[],
+  ...overrides
+});
+
 beforeEach(() => {
-  mockedTranslatePostDraft.mockReset();
+  mockedDraftPostTranslation.mockReset();
 });
 
 afterEach(() => {
@@ -122,48 +132,21 @@ afterEach(() => {
 });
 
 describe("admin translation routes", () => {
-  test("translates a Chinese draft to English with warnings and chunks", async () => {
+  test("translates a Chinese draft to English", async () => {
     const app = await createTestApp({ DEEPSEEK_API_KEY: "test-api-key" });
-    const input = {
-      source: sourceDraft("zh"),
-      targetLocale: "en"
-    };
-    const translationResponse = {
-      translation: {
-        locale: "en",
-        title: "TwoRiver Weekly",
-        summary: "This week's product progress.",
-        contentMarkdown: "## Progress\n\nThe editor translation flow is ready.",
-        seoTitle: "TwoRiver Weekly SEO",
-        seoDescription: "TwoRiver product weekly."
-      },
-      warnings: ["Kept product name TwoRiver untranslated."],
-      chunks: [
-        {
-          index: 0,
-          inputChars: 42,
-          outputChars: 58,
-          warnings: ["Chunk warning"]
-        }
-      ]
-    } satisfies TranslationDraftResponse;
-    mockedTranslatePostDraft.mockResolvedValueOnce(translationResponse);
+    const translationResponse = makeTranslationResult();
+    mockedDraftPostTranslation.mockResolvedValueOnce(translationResponse);
 
     try {
-      const response = await translateDraft(app, input);
+      const response = await translateDraft(app, {
+        source: sourceDraft("zh"),
+        targetLocale: "en"
+      });
 
       expect(response.statusCode).toBe(200);
+      expect(mockedDraftPostTranslation).toHaveBeenCalledTimes(1);
+      // Verify the translation result is returned
       expect(response.json()).toEqual(translationResponse);
-      expect(mockedTranslatePostDraft).toHaveBeenCalledTimes(1);
-      expect(mockedTranslatePostDraft).toHaveBeenCalledWith(
-        expect.objectContaining({
-          NODE_ENV: "test",
-          DEEPSEEK_API_KEY: "test-api-key",
-          DEEPSEEK_BASE_URL: "https://api.deepseek.com",
-          DEEPSEEK_MODEL: "deepseek-chat"
-        }),
-        input
-      );
     } finally {
       await app.close();
     }
@@ -171,31 +154,20 @@ describe("admin translation routes", () => {
 
   test("translates an English draft to Chinese", async () => {
     const app = await createTestApp({ DEEPSEEK_API_KEY: "test-api-key" });
-    const input = {
-      source: sourceDraft("en"),
-      targetLocale: "zh"
+    const translationResponse: Awaited<ReturnType<typeof draftPostTranslation>> = {
+      translation: { ...makeTranslationResult().translation, locale: "zh" },
+      warnings: []
     };
-    const translationResponse = {
-      translation: {
-        locale: "zh",
-        title: "TwoRiver zh weekly",
-        summary: "Product progress in zh locale.",
-        contentMarkdown: "## Zh progress\n\nThe editor translation flow is ready in zh locale.",
-        seoTitle: "TwoRiver zh weekly SEO",
-        seoDescription: "TwoRiver product weekly in zh locale."
-      },
-      warnings: [],
-      chunks: []
-    } satisfies TranslationDraftResponse;
-    mockedTranslatePostDraft.mockResolvedValueOnce(translationResponse);
+    mockedDraftPostTranslation.mockResolvedValueOnce(translationResponse);
 
     try {
-      const response = await translateDraft(app, input);
+      const response = await translateDraft(app, {
+        source: sourceDraft("en"),
+        targetLocale: "zh"
+      });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual(translationResponse);
-      expect(mockedTranslatePostDraft).toHaveBeenCalledTimes(1);
-      expect(mockedTranslatePostDraft).toHaveBeenCalledWith(expect.any(Object), input);
+      expect(mockedDraftPostTranslation).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
@@ -211,8 +183,8 @@ describe("admin translation routes", () => {
       });
 
       expect(response.statusCode).toBe(400);
-      expect(response.json()).toEqual({ message: "Source and target locales must be different" });
-      expect(mockedTranslatePostDraft).not.toHaveBeenCalled();
+      expect(response.json()).toEqual({ message: "Source and target languages must be different" });
+      expect(mockedDraftPostTranslation).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -225,15 +197,16 @@ describe("admin translation routes", () => {
       const response = await translateDraft(app, {
         source: {
           ...sourceDraft("zh"),
-          title: "   ",
-          contentMarkdown: "\n\t"
+          title: "",
+          contentMarkdown: "",
+          content: { format: "markdown", markdown: "" }
         },
         targetLocale: "en"
       });
 
       expect(response.statusCode).toBe(400);
-      expect(response.json()).toEqual({ message: "Source title or body is required" });
-      expect(mockedTranslatePostDraft).not.toHaveBeenCalled();
+      expect(response.json()).toEqual({ message: "Add a title or body before translating" });
+      expect(mockedDraftPostTranslation).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -241,7 +214,7 @@ describe("admin translation routes", () => {
 
   test("returns 503 when the translation provider is not configured", async () => {
     const app = await createTestApp();
-    mockedTranslatePostDraft.mockRejectedValueOnce(new TranslationProviderNotConfiguredError());
+    mockedDraftPostTranslation.mockRejectedValueOnce(new AiClientNotConfiguredError());
 
     try {
       const response = await translateDraft(app, {
@@ -250,8 +223,8 @@ describe("admin translation routes", () => {
       });
 
       expect(response.statusCode).toBe(503);
-      expect(response.json()).toEqual({ message: "Translation provider is not configured" });
-      expect(mockedTranslatePostDraft).toHaveBeenCalledTimes(1);
+      expect(response.json()).toEqual({ message: "AI translation is not configured" });
+      expect(mockedDraftPostTranslation).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
@@ -259,7 +232,7 @@ describe("admin translation routes", () => {
 
   test("returns 502 when the translation provider request fails", async () => {
     const app = await createTestApp({ DEEPSEEK_API_KEY: "test-api-key" });
-    mockedTranslatePostDraft.mockRejectedValueOnce(new TranslationProviderRequestError(new Error("upstream failed")));
+    mockedDraftPostTranslation.mockRejectedValueOnce(new AiProviderError(500, "upstream failed"));
 
     try {
       const response = await translateDraft(app, {
@@ -268,46 +241,41 @@ describe("admin translation routes", () => {
       });
 
       expect(response.statusCode).toBe(502);
-      expect(response.json()).toEqual({ message: "Translation provider request failed" });
-      expect(mockedTranslatePostDraft).toHaveBeenCalledTimes(1);
+      expect(mockedDraftPostTranslation).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
   });
 
-  test("rejects an extra top-level postId", async () => {
-    const app = await createTestApp();
+  test("returns 502 when ztrans returns a contract error", async () => {
+    const app = await createTestApp({ DEEPSEEK_API_KEY: "test-api-key" });
+    mockedDraftPostTranslation.mockRejectedValueOnce(new TranslationDraftContractError("Structure validation failed"));
 
     try {
       const response = await translateDraft(app, {
         source: sourceDraft("zh"),
-        targetLocale: "en",
-        postId: 123
+        targetLocale: "en"
       });
 
-      expect(response.statusCode).toBe(400);
-      expect(response.json()).toEqual({ message: "Invalid translation input" });
-      expect(mockedTranslatePostDraft).not.toHaveBeenCalled();
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toEqual({ message: "Structure validation failed" });
+      expect(mockedDraftPostTranslation).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
   });
 
-  test("rejects a nested source postId", async () => {
+  test("returns 400 for invalid translation input schema", async () => {
     const app = await createTestApp();
 
     try {
       const response = await translateDraft(app, {
-        source: {
-          ...sourceDraft("zh"),
-          postId: 123
-        },
+        source: { locale: "zh" },
         targetLocale: "en"
       });
 
       expect(response.statusCode).toBe(400);
-      expect(response.json()).toEqual({ message: "Invalid translation input" });
-      expect(mockedTranslatePostDraft).not.toHaveBeenCalled();
+      expect(mockedDraftPostTranslation).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

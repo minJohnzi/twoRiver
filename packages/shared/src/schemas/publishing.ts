@@ -365,10 +365,11 @@ export const TranslationDraftSourceSchema = z.object({
   locale: LocaleSchema,
   title: z.string(),
   summary: z.string().default(""),
+  content: ArticleContentSchema.optional(),
   contentMarkdown: z.string().default(""),
   seoTitle: z.string().nullable().default(null),
   seoDescription: z.string().nullable().default(null)
-}).strict();
+});
 export type TranslationDraftSource = z.infer<typeof TranslationDraftSourceSchema>;
 
 export const TranslationDraftInputSchema = z.object({
@@ -382,6 +383,7 @@ export const TranslationDraftResponseSchema = z.object({
     locale: LocaleSchema,
     title: z.string(),
     summary: z.string(),
+    content: ArticleContentSchema.optional(),
     contentMarkdown: z.string(),
     seoTitle: z.string().nullable(),
     seoDescription: z.string().nullable()

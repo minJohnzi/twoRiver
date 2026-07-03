@@ -33,8 +33,9 @@ const ConfigSchema = z.object({
 });
 
 type LoadedAppConfig = z.infer<typeof ConfigSchema>;
-export type AppConfig = Omit<LoadedAppConfig, "TIPTAP_PUBLISH_ENABLED"> & {
+export type AppConfig = Omit<LoadedAppConfig, "TIPTAP_PUBLISH_ENABLED" | "DEEPSEEK_MODEL"> & {
   TIPTAP_PUBLISH_ENABLED?: boolean;
+  DEEPSEEK_MODEL?: string;
 };
 
 interface LoadConfigOptions {
