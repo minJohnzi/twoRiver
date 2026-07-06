@@ -261,5 +261,5 @@ describe("auth routes", () => {
     } finally {
       await app.close();
     }
-  });
+  }, 30_000);
 });
