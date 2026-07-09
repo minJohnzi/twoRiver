@@ -108,19 +108,37 @@ describe("article document schema", () => {
   });
 
   test("rejects unsafe URLs", () => {
-    expectValidationCode(
-      {
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [{ type: "text", text: "bad", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] }]
-          }
-        ]
-      },
-      "unsafe-link"
-    );
+    for (const href of ["javascript:alert(1)", "data:text/html,<p>x</p>", "//evil.example/path", " https://example.com"]) {
+      expectValidationCode(
+        {
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "bad", marks: [{ type: "link", attrs: { href } }] }]
+            }
+          ]
+        },
+        "unsafe-link"
+      );
+    }
     expectValidationCode({ type: "doc", content: [{ type: "image", attrs: { src: "data:image/png;base64,AAAA" } }] }, "unsafe-image");
+  });
+
+  test("accepts external and site-relative links", () => {
+    for (const href of ["https://example.com/docs", "http://example.com/docs", "mailto:team@example.com", "/docs", "./docs", "../docs", "docs/page", "#intro"]) {
+      expect(
+        validateArticleDocument({
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "ok", marks: [{ type: "link", attrs: { href } }] }]
+            }
+          ]
+        })
+      ).toMatchObject({ type: "doc" });
+    }
   });
 
   test("rejects oversized URLs, excess depth, and excess node count", () => {
@@ -153,6 +171,43 @@ describe("article document schema", () => {
     expectValidationCode({ type: "doc", content: [{ type: "heading", attrs: { level: 7 }, content: [{ type: "text", text: "Bad" }] }] }, "invalid-heading-level");
     expectValidationCode({ type: "doc", content: [{ type: "heading", attrs: { level: 2, id: "" }, content: [{ type: "text", text: "Bad" }] }] }, "invalid-heading-id");
     expectValidationCode({ type: "doc", content: [{ type: "codeBlock", attrs: { language: "../ts" }, content: [{ type: "text", text: "Bad" }] }] }, "invalid-code-language");
+    expectValidationCode({ type: "doc", content: [{ type: "codeBlock", attrs: { language: "brainfuck" }, content: [{ type: "text", text: "Bad" }] }] }, "invalid-code-language");
+  });
+
+  test("normalizes supported code languages", () => {
+    for (const language of ["tsx", "jsx", "yaml", "scss", "sql", "go", "rust", "java", "mermaid"]) {
+      const document = validateArticleDocument({
+        type: "doc",
+        content: [{ type: "codeBlock", attrs: { language: language.toUpperCase() }, content: [{ type: "text", text: "ok" }] }]
+      });
+      expect(document.content[0]?.attrs?.language).toBe(language);
+    }
+
+    const aliasDocument = validateArticleDocument({
+      type: "doc",
+      content: [
+        { type: "codeBlock", attrs: { language: "ts" }, content: [{ type: "text", text: "ok" }] },
+        { type: "codeBlock", attrs: { language: "yml" }, content: [{ type: "text", text: "ok" }] }
+      ]
+    });
+    expect(aliasDocument.content.map((node) => node.attrs?.language)).toEqual(["ts", "yaml"]);
+  });
+
+  test("normalizes missing image alt to an empty string and rejects non-string alt", () => {
+    expect(
+      validateArticleDocument({
+        type: "doc",
+        content: [
+          { type: "image", attrs: { src: "/uploads/posts/example.png" } },
+          { type: "image", attrs: { src: "/uploads/posts/decorative.png", alt: null } }
+        ]
+      }).content.map((node) => node.attrs?.alt)
+    ).toEqual(["", ""]);
+
+    expectValidationCode(
+      { type: "doc", content: [{ type: "image", attrs: { src: "/uploads/posts/example.png", alt: 123 } }] },
+      "invalid-attr"
+    );
   });
 
   test("browser entry imports only browser-safe modules and exports validation helpers", async () => {

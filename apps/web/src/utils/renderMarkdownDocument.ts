@@ -1,4 +1,5 @@
 import type { Locale } from "@tworiver/shared";
+import { classifyArticleLink } from "@tworiver/content-engine/browser";
 import { marked } from "marked";
 import { hljs } from "./highlight";
 import { sanitizeMarkdownHtml } from "./sanitizeMarkdown";
@@ -178,11 +179,24 @@ function enhanceImages(template: HTMLTemplateElement, imageLabel: string): void 
   }
 }
 
+function enhanceLinks(template: HTMLTemplateElement): void {
+  for (const link of Array.from(template.content.querySelectorAll("a[href]"))) {
+    const href = link.getAttribute("href");
+    if (!href || classifyArticleLink(href) !== "external") {
+      continue;
+    }
+
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+  }
+}
+
 export function renderHtmlDocument(html: string, labels: MarkdownLabels): RenderedMarkdownDocument {
   const sanitized = sanitizeMarkdownHtml(html);
   const template = document.createElement("template");
   template.innerHTML = sanitized;
 
+  enhanceLinks(template);
   enhanceCodeBlocks(template, labels.copy);
   enhanceTables(template);
   enhanceImages(template, labels.openImage);

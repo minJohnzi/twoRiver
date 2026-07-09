@@ -606,16 +606,15 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/new");
 
     expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Use rich text" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Switch body format" })).not.toBeInTheDocument();
     cleanup();
 
     vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
     renderEditor("/admin/posts/new");
 
-    expect(await screen.findByRole("button", { name: /Use Markdown/ })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
-
     expect(await loadedArticleTextbox()).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch body format" })).toHaveTextContent("Rich text");
+    expect(screen.getByRole("button", { name: "Switch body format" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
   });
 
@@ -623,18 +622,19 @@ describe("admin editor image uploads", () => {
     vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
     renderEditor("/admin/posts/new");
 
-    expect(await screen.findByLabelText("Markdown body")).toBeInTheDocument();
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Title first" } });
 
-    expect(screen.getByRole("button", { name: "Use rich text" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Use rich text" }));
-
-    expect(await loadedArticleTextbox()).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Title first")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Use Markdown/ }));
+    expect(screen.getByRole("button", { name: "Switch body format" })).toHaveTextContent("Rich text");
+    fireEvent.click(screen.getByRole("button", { name: "Switch body format" }));
 
     expect(await screen.findByLabelText("Markdown body")).toHaveValue("");
-    expect(screen.queryByRole("textbox", { name: "Article body" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Title first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch body format" })).toHaveTextContent("Markdown");
+    fireEvent.click(screen.getByRole("button", { name: "Switch body format" }));
+
+    expect(await loadedArticleTextbox()).toBeInTheDocument();
+    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -650,12 +650,11 @@ describe("admin editor image uploads", () => {
     vi.stubEnv("VITE_TIPTAP_NEW_ARTICLE_ENABLED", "true");
     renderEditor("/admin/posts/new");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Use rich text" }));
     expect(await loadedArticleTextbox()).toBeInTheDocument();
 
     insert();
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: /Use Markdown/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Switch body format" })).not.toBeInTheDocument());
   });
 
   it("treats a TipTap image without alt text as body content when validating translations", async () => {
@@ -1337,7 +1336,7 @@ describe("admin editor image uploads", () => {
     expect(within(outline).queryByRole("button", { name: "Ignored" })).not.toBeInTheDocument();
   });
 
-  it("switches between markdown source, split, and preview modes", async () => {
+  it("keeps markdown source editable when switching modes without rendering the preview pane", async () => {
     mockedFetchAdminPost.mockResolvedValue({
       post: makePost({
         translations: [
@@ -1366,8 +1365,9 @@ describe("admin editor image uploads", () => {
     const modeTabs = screen.getByRole("tablist", { name: "Markdown editor mode" });
 
     fireEvent.click(within(modeTabs).getByRole("button", { name: "Preview" }));
-    expect(screen.queryByLabelText("Markdown body")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+    expect(await loadedMarkdownTextarea()).toBeInTheDocument();
+    expect(document.querySelector("#editor-preview")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Preview heading" })).not.toBeInTheDocument();
 
     fireEvent.click(within(modeTabs).getByRole("button", { name: "MD source" }));
     expect(await loadedMarkdownTextarea()).toBeInTheDocument();
@@ -1375,7 +1375,8 @@ describe("admin editor image uploads", () => {
 
     fireEvent.click(within(modeTabs).getByRole("button", { name: "Source + preview" }));
     expect(await loadedMarkdownTextarea()).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Preview heading" })).toBeInTheDocument();
+    expect(document.querySelector("#editor-preview")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Preview heading" })).not.toBeInTheDocument();
   });
 
   it("opens markdown body search with Ctrl+F and cycles matches", async () => {
@@ -1607,7 +1608,7 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/1");
 
     await loadedMarkdownTextarea();
-    fireEvent.click(screen.getByRole("button", { name: "Translate to Chinese" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync translation" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Replace existing translation?" })).getByRole("button", { name: "Continue" }));
 
     await waitFor(() =>
@@ -1639,13 +1640,13 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/1");
 
     await loadedMarkdownTextarea();
-    fireEvent.click(screen.getByRole("button", { name: "Translate to Chinese" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync translation" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Replace existing translation?" })).getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByRole("status", { name: "Translation progress" })).toHaveTextContent(
       "Generating translation draft"
     );
-    expect(screen.getByRole("button", { name: "Translating..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Syncing..." })).toBeDisabled();
 
     resolveTranslation?.({
       translation: {
@@ -1675,7 +1676,7 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/1");
 
     const textarea = await loadedMarkdownTextarea();
-    fireEvent.click(screen.getByRole("button", { name: "Translate to Chinese" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sync translation" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Replace existing translation?" })).getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByRole("status", { name: "Translation progress" })).toBeInTheDocument();
@@ -1731,7 +1732,7 @@ describe("admin editor image uploads", () => {
     renderEditor("/admin/posts/1");
 
     expect(await loadedArticleTextbox()).toHaveTextContent("TipTap body");
-    const translateButton = screen.getByRole("button", { name: "Translate to Chinese" });
+    const translateButton = screen.getByRole("button", { name: "Sync translation" });
     expect(translateButton).toBeEnabled();
     fireEvent.click(translateButton);
 

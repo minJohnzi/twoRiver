@@ -8,6 +8,7 @@ import {
   MAX_ARTICLE_URL_LENGTH
 } from "./documentLimits.js";
 import { articleExtensions } from "./articleExtensions.js";
+import { normalizeCodeBlockLanguage } from "./codeLanguages.js";
 import { isAllowedImage, isAllowedLink } from "./urlPolicy.js";
 
 const textEncoder = new TextEncoder();
@@ -201,13 +202,16 @@ function validateHeadingAttrs(attrs: Record<string, unknown> | undefined, path: 
 }
 
 function validateCodeBlockAttrs(attrs: Record<string, unknown> | undefined, path: ArticleDocumentValidationPath): void {
-  const language = attrs?.language;
-  if (
-    language !== undefined &&
-    language !== null &&
-    (typeof language !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_+.-]{0,31}$/.test(language))
-  ) {
+  const normalizedLanguage = normalizeCodeBlockLanguage(attrs?.language);
+  if (normalizedLanguage === null) {
     throw new ArticleDocumentValidationError("invalid-code-language", path.concat("attrs", "language"));
+  }
+  if (attrs !== undefined && attrs.language !== normalizedLanguage) {
+    if (normalizedLanguage === undefined) {
+      delete attrs.language;
+    } else {
+      attrs.language = normalizedLanguage;
+    }
   }
 }
 
@@ -220,7 +224,13 @@ function validateImageAttrs(attrs: Record<string, unknown> | undefined, path: Ar
   if (!isAllowedImage(src)) {
     throw new ArticleDocumentValidationError("unsafe-image", path.concat("attrs", "src"));
   }
-  validateOptionalStringAttr(attrs?.alt, path.concat("attrs", "alt"));
+  if (attrs === undefined) {
+    throw new ArticleDocumentValidationError("unsafe-image", path.concat("attrs", "src"));
+  }
+  if (attrs.alt === undefined || attrs.alt === null) {
+    attrs.alt = "";
+  }
+  validateRequiredStringAttr(attrs.alt, path.concat("attrs", "alt"));
   validateOptionalStringAttr(attrs?.title, path.concat("attrs", "title"));
 }
 
@@ -263,6 +273,12 @@ function validateUrlLength(value: string, path: ArticleDocumentValidationPath): 
 
 function validateOptionalStringAttr(value: unknown, path: ArticleDocumentValidationPath): void {
   if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new ArticleDocumentValidationError("invalid-attr", path);
+  }
+}
+
+function validateRequiredStringAttr(value: unknown, path: ArticleDocumentValidationPath): void {
+  if (typeof value !== "string") {
     throw new ArticleDocumentValidationError("invalid-attr", path);
   }
 }

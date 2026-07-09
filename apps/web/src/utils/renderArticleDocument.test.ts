@@ -34,6 +34,65 @@ describe("renderArticleDocument", () => {
     expect(result.headings).toEqual([{ id: "kept-id", level: 2, text: "Canonical" }]);
   });
 
+  it("enhances rendered TipTap code blocks with copy controls and language labels", () => {
+    const result = renderArticleDocument(
+      {
+        locale: "en",
+        contentMarkdown: "```ts\nfallback()\n```",
+        content: {
+          format: "tiptap",
+          schemaVersion: 1,
+          doc: {
+            type: "doc",
+            content: [{ type: "codeBlock", attrs: { language: "tsx" }, content: [{ type: "text", text: "const view = <App />;" }] }]
+          }
+        }
+      },
+      getMarkdownLabels("en")
+    );
+
+    expect(result.html).toContain('class="code-window"');
+    expect(result.html).toContain('class="markdown-code-language">tsx</span>');
+    expect(result.html).toContain('data-copy-code="true"');
+    expect(result.html).toContain('class="hljs language-tsx"');
+    expect(result.html).not.toContain("fallback");
+  });
+
+  it("keeps external TipTap links safe after HTML rendering and sanitizing", () => {
+    const result = renderArticleDocument(
+      {
+        locale: "en",
+        contentMarkdown: "[Fallback](/fallback)",
+        content: {
+          format: "tiptap",
+          schemaVersion: 1,
+          doc: {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  { type: "text", text: "External", marks: [{ type: "link", attrs: { href: "https://example.com", target: "_self", rel: "nofollow" } }] },
+                  { type: "text", text: " internal", marks: [{ type: "link", attrs: { href: "/docs", target: "_self" } }] }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      getMarkdownLabels("en")
+    );
+
+    const template = document.createElement("template");
+    template.innerHTML = result.html;
+    const external = template.content.querySelector<HTMLAnchorElement>('a[href="https://example.com"]');
+    const internal = template.content.querySelector<HTMLAnchorElement>('a[href="/docs"]');
+
+    expect(external?.getAttribute("target")).toBe("_blank");
+    expect(external?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(internal?.hasAttribute("target")).toBe(false);
+  });
+
   it("falls back to compatibility Markdown and logs safe metadata when rendering fails", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 

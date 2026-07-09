@@ -66,13 +66,13 @@ test("article images fit the markdown width and open a larger preview", async ({
   const title = `E2E Image ${suffix}`;
 
   await page.goto("/admin/login");
-  await page.getByLabel("Username").fill("admin");
-  await page.getByLabel("Password").fill("secret1234567");
-  await page.getByRole("button", { name: "Unlock admin" }).click();
-  await expect(page.getByRole("heading", { name: "Publishing console" })).toBeVisible();
+  await page.getByPlaceholder("Username or email").fill("admin");
+  await page.getByPlaceholder("Enter your secure password").fill("secret1234567");
+  await page.getByRole("button", { name: /Verify and enter console|Unlock admin/ }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
   await page.goto("/admin/posts/new");
-  await page.getByLabel("Slug").fill(slug);
+  await page.getByRole("textbox", { name: "Slug", exact: true }).fill(slug);
   await page.getByLabel("Title").fill(title);
   await page.getByLabel("Markdown body").fill("Before the image.\n\nAfter the image.");
   await page.locator(".editor-actions").getByRole("button", { name: "Save draft" }).click();

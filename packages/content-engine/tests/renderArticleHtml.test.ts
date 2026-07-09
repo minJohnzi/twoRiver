@@ -71,7 +71,7 @@ describe("renderArticleHtml", () => {
       [
         '<h2 id="intro">Intro &lt;safe&gt;</h2>',
         '<p><strong>Bold</strong><em> italic</em><s> strike</s><code> code</code>',
-        '<a href="https://example.com/?q=&lt;x&gt;&amp;ok=1" target="_blank" rel="noreferrer" class="article-link"> link &amp; label</a>',
+        '<a href="https://example.com/?q=&lt;x&gt;&amp;ok=1" class="article-link" target="_blank" rel="noopener noreferrer"> link &amp; label</a>',
         "<br>after break</p>",
         "<blockquote><p>Quote</p></blockquote>",
         "<ul><li><p>Bullet</p></li></ul>",
@@ -82,6 +82,59 @@ describe("renderArticleHtml", () => {
         '<table><tr><th colspan="2"><p>H</p></th></tr><tr><td rowspan="2"><p>C</p></td></tr></table>'
       ].join("")
     );
+  });
+
+  it("renders external links with safe defaults and preserves internal relative links", () => {
+    expect(
+      renderArticleHtml({
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: "External", marks: [{ type: "link", attrs: { href: "https://example.com", rel: "nofollow" } }] },
+              { type: "text", text: " internal", marks: [{ type: "link", attrs: { href: "/blog/post", target: "_self" } }] }
+            ]
+          }
+        ]
+      })
+    ).toBe(
+      '<p><a href="https://example.com" target="_blank" rel="noopener noreferrer">External</a><a href="/blog/post" target="_self"> internal</a></p>'
+    );
+  });
+
+  it("renders supported code languages as standard language classes", () => {
+    const languages = ["tsx", "jsx", "yaml", "scss", "sql", "go", "rust", "java", "mermaid"];
+    const document: ArticleDocument = {
+      type: "doc",
+      content: languages.map((language) => ({
+        type: "codeBlock",
+        attrs: { language },
+        content: [{ type: "text", text: `${language} body` }]
+      }))
+    };
+
+    const html = renderArticleHtml(document);
+
+    for (const language of languages) {
+      expect(html).toContain(`class="hljs language-${language}"`);
+      expect(html).toContain(`${language} body`);
+    }
+  });
+
+  it("throws stable errors for unsafe links and invalid code languages", () => {
+    expect(
+      renderFailureCode({
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "x", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] }] }]
+      })
+    ).toBe("unsafe-link-href");
+    expect(
+      renderFailureCode({
+        type: "doc",
+        content: [{ type: "codeBlock", attrs: { language: "../ts" }, content: [{ type: "text", text: "x" }] }]
+      })
+    ).toBe("invalid-code-language");
   });
 
   it("throws stable errors for unsupported nodes and marks", () => {

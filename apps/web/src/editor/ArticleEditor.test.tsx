@@ -60,6 +60,7 @@ function toolbarState(overrides: Partial<ArticleEditorToolbarState> = {}): Artic
     isParagraph: true,
     isHeading2: false,
     isHeading3: false,
+    isHeading4: false,
     isBold: false,
     isItalic: false,
     isStrike: false,
@@ -74,6 +75,9 @@ function toolbarState(overrides: Partial<ArticleEditorToolbarState> = {}): Artic
     canRedo: true,
     codeLanguage: "plaintext",
     linkHref: "",
+    hasSelection: false,
+    isFocused: false,
+    isEmptyParagraph: false,
     ...overrides
   };
 }
@@ -88,6 +92,7 @@ function toolbarActions(): ArticleEditorToolbarActions & { calls: string[] } {
     toggleItalic: () => calls.push("toggleItalic"),
     toggleStrike: () => calls.push("toggleStrike"),
     toggleCode: () => calls.push("toggleCode"),
+    toggleCodeBlock: () => calls.push("toggleCodeBlock"),
     toggleBulletList: () => calls.push("toggleBulletList"),
     toggleOrderedList: () => calls.push("toggleOrderedList"),
     toggleBlockquote: () => calls.push("toggleBlockquote"),
@@ -213,6 +218,7 @@ describe("ArticleEditorToolbarView", () => {
       "Paragraph",
       "Heading 2",
       "Heading 3",
+      "Heading 4",
       "Bold",
       "Italic",
       "Strike",
@@ -220,20 +226,21 @@ describe("ArticleEditorToolbarView", () => {
       "Bullet list",
       "Ordered list",
       "Quote",
+      "Horizontal rule",
       "Insert image",
+      "Code block",
       "Insert table",
       "Add row",
       "Delete row",
       "Add column",
       "Delete column",
-      "Horizontal rule",
       "Undo",
       "Redo"
     ]) {
       fireEvent.click(screen.getByRole("button", { name: label }));
     }
 
-    fireEvent.change(screen.getByLabelText("Code block language"), { target: { value: "ts" } });
+    fireEvent.change(screen.getByLabelText("Code block language"), { target: { value: "tsx" } });
     fireEvent.click(screen.getByRole("button", { name: "Link" }));
     fireEvent.change(screen.getByLabelText("Link URL"), { target: { value: "https://example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply link" }));
@@ -242,6 +249,7 @@ describe("ArticleEditorToolbarView", () => {
       "setParagraph",
       "setHeading:2",
       "setHeading:3",
+      "setHeading:4",
       "toggleBold",
       "toggleItalic",
       "toggleStrike",
@@ -249,18 +257,34 @@ describe("ArticleEditorToolbarView", () => {
       "toggleBulletList",
       "toggleOrderedList",
       "toggleBlockquote",
+      "insertHorizontalRule",
       "requestImage",
+      "toggleCodeBlock",
       "insertTable",
       "addTableRow",
       "deleteTableRow",
       "addTableColumn",
       "deleteTableColumn",
-      "insertHorizontalRule",
       "undo",
       "redo",
-      "setCodeBlockLanguage:ts",
+      "setCodeBlockLanguage:tsx",
       "setLink:https://example.com"
     ]);
+  });
+
+  it("marks active H4 and code-block controls as pressed", () => {
+    const actions = toolbarActions();
+    render(
+      <ArticleEditorToolbarView
+        locale="en"
+        state={toolbarState({ isParagraph: false, isHeading4: true, isCodeBlock: true, codeLanguage: "mermaid" })}
+        actions={actions}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Heading 4" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Code block" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Code block language")).toHaveValue("mermaid");
   });
 
   it("disables editing controls for read-only state and table controls outside tables", () => {

@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TwoRiver Article Composer UI Prototype</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --subtle: #8a94a6;
+      --line: #d9e0e8;
+      --line-strong: #c7d0dc;
+      --panel: #fafbf8;
+      --paper: #fffdf8;
+      --canvas: #eef1f4;
+      --accent: #9f6a2a;
+      --accent-soft: #fff4df;
+      --green: #2f6f5b;
+      --green-soft: #edf6f0;
+      --danger: #9f2f3a;
+      --danger-soft: #fff7f6;
+      --shadow: 0 24px 60px rgba(24, 32, 48, 0.11);
+      font-synthesis: none;
+      line-break: strict;
+      color: var(--ink);
+      background: #dfe5eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      font-family: "Newsreader", "Noto Serif SC", "Songti SC", "Microsoft YaHei", serif;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 51, 0.04) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(23, 32, 51, 0.04) 1px, transparent 1px),
+        var(--canvas);
+      background-size: 36px 36px;
+      color: var(--ink);
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    .prototype {
+      min-height: 100vh;
+      padding: 18px;
+    }
+
+    .assumption-strip {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.92fr) minmax(360px, 1.4fr) auto;
+      gap: 18px;
+      align-items: center;
+      width: min(1720px, 100%);
+      margin: 0 auto 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(250, 251, 248, 0.96);
+      box-shadow: 0 14px 32px rgba(24, 32, 48, 0.08);
+      padding: 14px 16px;
+      backdrop-filter: blur(18px);
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--accent);
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .assumption-strip h1 {
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(22px, 1.7vw, 34px);
+      line-height: 1.15;
+      text-wrap: balance;
+    }
+
+    .assumption-strip p {
+      margin: 0;
+      color: var(--muted);
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.7;
+      text-wrap: pretty;
+    }
+
+    .state-switch {
+      display: inline-flex;
+      gap: 4px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #f4f6f7;
+      padding: 4px;
+    }
+
+    .state-switch button {
+      min-height: 34px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 12px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .state-switch button.is-active {
+      background: #172033;
+      color: #fffdf8;
+    }
+
+    .app-frame {
+      display: grid;
+      grid-template-columns: 68px minmax(0, 1fr);
+      width: min(1720px, 100%);
+      min-height: calc(100vh - 122px);
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .rail {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      border-right: 1px solid var(--line);
+      background: #172033;
+      padding: 14px 10px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      margin-bottom: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 7px;
+      color: #fffdf8;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .rail button {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.72);
+      font-family: "Geist Mono", "Noto Sans SC", monospace;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .rail button.is-active {
+      background: #fffdf8;
+      color: #172033;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      gap: 18px;
+      align-items: center;
+      min-height: 68px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(250, 251, 248, 0.97);
+      padding: 10px 20px;
+    }
+
+    .breadcrumbs {
+      display: grid;
+      min-width: 0;
+      gap: 3px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .breadcrumbs span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .breadcrumbs strong {
+      color: var(--ink);
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .actions::-webkit-scrollbar {
+      display: none;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--ink);
+      padding: 0 14px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
+    .button.primary {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: #fffdf8;
+    }
+
+    .button.danger {
+      border-color: #ead0d2;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .body-grid {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr) 360px;
+      min-height: 0;
+    }
+
+    .left-panel,
+    .right-panel {
+      min-width: 0;
+      overflow: auto;
+      background: var(--panel);
+      padding: 22px 18px 32px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .left-panel {
+      border-right: 1px solid var(--line);
+    }
+
+    .right-panel {
+      border-left: 1px solid var(--line);
+    }
+
+    .panel-section {
+      display: grid;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 22px;
+      padding-bottom: 22px;
+    }
+
+    .panel-section:last-child {
+      border-bottom: 0;
+      margin-bottom: 0;
+    }
+
+    .panel-section h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 860;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .outline {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .outline button {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: #3b4758;
+      padding: 8px;
+      font-size: 13px;
+      font-weight: 680;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    .outline button:hover,
+    .outline button.is-active {
+      border-color: #d8c7aa;
+      background: var(--accent-soft);
+      color: #7d4f18;
+    }
+
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .asset-stat {
+      display: grid;
+      gap: 2px;
+      min-height: 58px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      padding: 9px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .asset-stat strong {
+      color: var(--ink);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .canvas {
+      min-width: 0;
+      overflow: auto;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 51, 0.045) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(23, 32, 51, 0.045) 1px, transparent 1px),
+        #eceff2;
+      background-size: 36px 36px;
+      padding: 38px 34px 64px;
+    }
+
+    .paper {
+      width: min(980px, 100%);
+      min-height: 760px;
+      margin: 0 auto;
+      border: 1px solid var(--paper-line);
+      border-radius: 6px;
+      background:
+        linear-gradient(90deg, transparent 0, transparent 53px, rgba(159, 106, 42, 0.26) 54px, transparent 55px),
+        var(--paper);
+      box-shadow: 0 24px 52px rgba(46, 38, 27, 0.1);
+      padding: 34px clamp(34px, 5vw, 76px) 64px;
+    }
+
+    .paper-toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      border-bottom: 1px solid var(--paper-line);
+      margin-bottom: 34px;
+      padding-bottom: 14px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .locale-tabs {
+      display: inline-flex;
+      gap: 3px;
+      border: 1px solid #ded5c6;
+      border-radius: 7px;
+      background: #f7f1e6;
+      padding: 3px;
+    }
+
+    .locale-tabs button {
+      min-height: 32px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: #6a5a44;
+      padding: 0 12px;
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .locale-tabs button.is-active {
+      background: var(--ink);
+      color: #fffdf8;
+    }
+
+    .mode-note {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      border: 1px solid #cbd9d3;
+      border-radius: 7px;
+      background: var(--green-soft);
+      color: var(--green);
+      padding: 0 10px;
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .title-input {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      padding: 0;
+      font-size: clamp(38px, 3.2vw, 56px);
+      font-weight: 860;
+      line-height: 1.12;
+      letter-spacing: 0;
+      outline: 0;
+    }
+
+    .title-input::placeholder {
+      color: #b7ad9f;
+    }
+
+    .summary-box {
+      display: grid;
+      gap: 10px;
+      border: 1px solid #e4dac8;
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: var(--accent-soft);
+      margin-top: 18px;
+      padding: 14px 16px;
+    }
+
+    .summary-box span {
+      width: fit-content;
+      border-radius: 6px;
+      background: #efe0c9;
+      color: #7d4f18;
+      padding: 4px 8px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .summary-box textarea {
+      width: 100%;
+      min-height: 72px;
+      border: 0;
+      background: transparent;
+      color: #5b4d3c;
+      padding: 0;
+      font-size: 18px;
+      line-height: 1.6;
+      outline: 0;
+      resize: vertical;
+    }
+
+    .format-bar {
+      position: sticky;
+      top: 0;
+      z-index: 4;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      border: 1px solid #d5d9dd;
+      background: rgba(251, 250, 245, 0.98);
+      box-shadow: 0 14px 34px rgba(46, 38, 27, 0.1);
+      margin: 26px calc(clamp(34px, 5vw, 76px) * -1) 0;
+      padding: 9px 16px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .format-bar button,
+    .format-bar select {
+      min-width: 34px;
+      min-height: 34px;
+      border: 1px solid #d5d9dd;
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--ink);
+      padding: 0 10px;
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    .format-bar button.is-active {
+      border-color: #c5d7ce;
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .body-surface {
+      min-height: 420px;
+      border: 1px solid #e4dac8;
+      border-radius: 8px;
+      background:
+        repeating-linear-gradient(180deg, transparent 0, transparent 34px, rgba(231, 223, 208, 0.42) 35px),
+        #fffefa;
+      margin-top: 16px;
+      padding: 30px 34px 42px;
+      font-size: 18px;
+      line-height: 1.82;
+      outline: 0;
+    }
+
+    .body-surface h2 {
+      margin: 0 0 14px;
+      font-size: 26px;
+      line-height: 1.32;
+      text-wrap: balance;
+    }
+
+    .body-surface p {
+      margin: 0 0 18px;
+      color: #273142;
+      text-wrap: pretty;
+    }
+
+    .body-placeholder {
+      border: 1px dashed #c9d2db;
+      border-radius: 8px;
+      background: rgba(244, 246, 247, 0.72);
+      color: var(--muted);
+      margin: 20px 0;
+      padding: 18px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .sync-strip {
+      display: grid;
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      width: min(640px, 100%);
+      border: 1px solid #cbd9d3;
+      border-radius: 10px;
+      background: #f7fbf8;
+      box-shadow: 0 16px 34px rgba(47, 111, 91, 0.1);
+      margin: 28px auto 0;
+      padding: 9px 11px;
+      font-family: "Geist", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--ink);
+      padding: 0 10px;
+      font-size: 13px;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
+    .chip.green {
+      border-color: #cbd9d3;
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .chip.warn {
+      border-color: #efd4a8;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .sync-strip input {
+      min-width: 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      outline: 0;
+    }
+
+    .field-stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .right-panel input,
+    .right-panel select {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      color: var(--ink);
+      padding: 0 12px;
+      font-size: 14px;
+    }
+
+    .meta-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fffefa;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .meta-row strong {
+      color: var(--ink);
+      text-align: right;
+    }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .cover-slot {
+      display: grid;
+      place-items: center;
+      min-height: 140px;
+      border: 1px dashed #c8d3cf;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(237, 246, 240, 0.9), rgba(255, 249, 238, 0.9)),
+        #fffefa;
+      color: #405449;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .quality {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .quality li {
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #cfd7e3;
+    }
+
+    .dot.done {
+      background: var(--green);
+    }
+
+    .focus-mode .left-panel,
+    .focus-mode .right-panel,
+    .focus-mode .topbar,
+    .focus-mode .sync-strip {
+      display: none;
+    }
+
+    .focus-mode .body-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .focus-mode .app-frame {
+      grid-template-columns: 68px minmax(0, 1fr);
+    }
+
+    @media (max-width: 1180px) {
+      .assumption-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .body-grid {
+        grid-template-columns: minmax(0, 1fr) 340px;
+      }
+
+      .left-panel {
+        display: none;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .prototype {
+        padding: 0;
+      }
+
+      .assumption-strip,
+      .app-frame {
+        width: 100%;
+        border-inline: 0;
+        border-radius: 0;
+        margin: 0;
+      }
+
+      .app-frame {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        display: none;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+
+      .body-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .right-panel {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+      }
+
+      .canvas {
+        padding: 16px 10px 34px;
+      }
+
+      .paper {
+        padding: 28px 22px 42px;
+      }
+
+      .format-bar {
+        margin-inline: -22px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype" id="prototype">
+    <section class="assumption-strip" aria-label="设计假设">
+      <div>
+        <p class="eyebrow">Assumption / Prototype</p>
+        <h1>文章创建与编辑页面：先把写作本身放到画面中央。</h1>
+      </div>
+      <p>
+        假设这是一套给站点管理员长期使用的写作工具，而不是营销页。方向采用「编辑部工作台」：左侧保留结构感，中间是可沉浸的纸面，右侧承接发布、标签、封面与质量检查。文案和数据均为可替换占位，不编造真实指标。
+      </p>
+      <div class="state-switch" aria-label="原型状态切换">
+        <button class="is-active" type="button" data-state="create">新建文章</button>
+        <button type="button" data-state="edit">编辑文章</button>
+        <button type="button" data-state="focus">沉浸写作</button>
+      </div>
+    </section>
+
+    <section class="app-frame" aria-label="文章编辑器原型">
+      <nav class="rail" aria-label="Admin navigation">
+        <div class="mark">TR</div>
+        <button class="is-active" type="button">文</button>
+        <button type="button">资</button>
+        <button type="button">类</button>
+        <button type="button">设</button>
+      </nav>
+
+      <section class="workbench">
+        <header class="topbar">
+          <div class="breadcrumbs">
+            <span>文章管理 / <span id="crumb-mode">新建文章</span> / Rich text</span>
+            <strong id="screen-title">新建文章</strong>
+          </div>
+          <div class="actions" aria-label="文章操作">
+            <button class="button" type="button">同步翻译</button>
+            <button class="button" type="button">保存草稿</button>
+            <button class="button primary" type="button" id="publish-button">发布</button>
+            <button class="button danger edit-only" type="button" hidden>删除</button>
+          </div>
+        </header>
+
+        <div class="body-grid">
+          <aside class="left-panel" aria-label="写作导航">
+            <section class="panel-section">
+              <h2>Outline</h2>
+              <ol class="outline">
+                <li><button class="is-active" type="button">为什么重做编辑页</button></li>
+                <li><button type="button">信息密度怎么分层</button></li>
+                <li><button type="button">发布前检查项</button></li>
+                <li><button type="button">下一步迭代</button></li>
+              </ol>
+            </section>
+            <section class="panel-section">
+              <h2>Assets</h2>
+              <div class="asset-grid">
+                <span class="asset-stat"><strong>2</strong>图片</span>
+                <span class="asset-stat"><strong>1</strong>代码块</span>
+                <span class="asset-stat"><strong>0</strong>表格</span>
+                <span class="asset-stat"><strong>0</strong>Mermaid</span>
+              </div>
+            </section>
+            <section class="panel-section">
+              <h2>Placeholder</h2>
+              <p style="margin:0;color:var(--muted);font-size:13px;line-height:1.65;">如果没有标题层级，这里显示「添加 H2-H4 后生成大纲」。如果没有真实封面图，右栏保持诚实占位。</p>
+            </section>
+          </aside>
+
+          <section class="canvas" aria-label="写作画布">
+            <article class="paper">
+              <div class="paper-toolbar">
+                <div class="locale-tabs" role="tablist" aria-label="语言">
+                  <button class="is-active" type="button">中文</button>
+                  <button type="button">English</button>
+                </div>
+                <button class="mode-note" type="button" id="focus-toggle">沉浸写作</button>
+              </div>
+
+              <input class="title-input" id="title-input" value="" placeholder="输入文章标题" aria-label="文章标题" />
+
+              <label class="summary-box">
+                <span>摘要</span>
+                <textarea id="summary-input" aria-label="文章摘要" placeholder="用一两句话说明本文要解决的问题。"></textarea>
+              </label>
+
+              <div class="format-bar" aria-label="编辑工具栏">
+                <select aria-label="段落格式">
+                  <option>正文</option>
+                  <option>H2</option>
+                  <option>H3</option>
+                </select>
+                <button class="is-active" type="button">B</button>
+                <button type="button">I</button>
+                <button type="button">`</button>
+                <button type="button">•</button>
+                <button type="button">1.</button>
+                <button type="button">引</button>
+                <button type="button">图</button>
+                <button type="button">表</button>
+                <button type="button">撤</button>
+                <button type="button">重</button>
+              </div>
+
+              <section class="body-surface" contenteditable="true" aria-label="正文编辑区">
+                <h2>为什么重做编辑页</h2>
+                <p>当前页面承载了标题、摘要、正文、翻译、标签、封面、发布状态和格式转换。新的布局把这些信息重新分层：写作内容在画面中心，发布动作保持可达，但不抢走注意力。</p>
+                <p>中间的纸面不是装饰，它提供清晰的阅读宽度和写作节奏；左栏负责结构导航，右栏负责元信息与发布检查。</p>
+                <div class="body-placeholder">
+                  图片 / 表格 / 代码块预览位。等待用户提供真实内容时保持占位，不伪造数据。
+                </div>
+                <h2>信息密度怎么分层</h2>
+                <p>一级信息是标题和正文。二级信息是摘要、语言和编辑工具。三级信息是标签、封面、Slug、检查清单。这样创建文章时不会像填报表，编辑文章时也能迅速定位发布风险。</p>
+              </section>
+
+              <div class="sync-strip" aria-label="同步翻译">
+                <span class="chip green">AI</span>
+                <input readonly value="中文 -> English" aria-label="同步翻译目标" />
+                <button class="button primary" type="button">同步</button>
+              </div>
+            </article>
+          </section>
+
+          <aside class="right-panel" aria-label="文章设置">
+            <section class="panel-section">
+              <h2>Publish</h2>
+              <div class="tags">
+                <span class="chip warn" id="status-chip">草稿</span>
+                <span class="chip green">可保存</span>
+                <span class="chip">Rich text</span>
+              </div>
+              <p style="margin:0;color:var(--muted);font-size:13px;line-height:1.65;">发布动作留在顶部；这里显示状态解释和风险，不重复堆按钮。</p>
+            </section>
+
+            <section class="panel-section">
+              <h2>Article info</h2>
+              <div class="field-stack">
+                <label>Slug
+                  <input value="" placeholder="auto-from-title" />
+                </label>
+                <label>分类
+                  <select>
+                    <option>不设置分类</option>
+                    <option>技术笔记</option>
+                    <option>产品日志</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Tags</h2>
+              <div class="tags">
+                <span class="chip">编辑器</span>
+                <span class="chip">发布流程</span>
+                <span class="chip">UI</span>
+              </div>
+              <label>搜索标签
+                <input placeholder="输入名称或 slug" />
+              </label>
+            </section>
+
+            <section class="panel-section">
+              <h2>Cover</h2>
+              <div class="cover-slot">封面图待补</div>
+              <p style="margin:0;color:var(--muted);font-size:13px;line-height:1.65;">封面作为文章元信息保留，正文图片仍在编辑器内管理。</p>
+            </section>
+
+            <section class="panel-section">
+              <h2>Current block</h2>
+              <div class="meta-row">
+                <span>语言</span><strong>中文</strong>
+                <span>目标</span><strong>English</strong>
+                <span>格式</span><strong>Rich text</strong>
+              </div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Checklist</h2>
+              <ul class="quality">
+                <li><span class="dot done"></span><strong>标题</strong><span>完成</span></li>
+                <li><span class="dot done"></span><strong>摘要</strong><span>完成</span></li>
+                <li><span class="dot done"></span><strong>正文</strong><span>完成</span></li>
+                <li><span class="dot"></span><strong>封面</strong><span>待补</span></li>
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const prototypeRoot = document.getElementById("prototype");
+    const stateButtons = document.querySelectorAll("[data-state]");
+    const titleInput = document.getElementById("title-input");
+    const summaryInput = document.getElementById("summary-input");
+    const screenTitle = document.getElementById("screen-title");
+    const crumbMode = document.getElementById("crumb-mode");
+    const publishButton = document.getElementById("publish-button");
+    const statusChip = document.getElementById("status-chip");
+    const focusToggle = document.getElementById("focus-toggle");
+    const editOnly = document.querySelector(".edit-only");
+
+    function setState(nextState) {
+      stateButtons.forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.state === nextState);
+      });
+
+      prototypeRoot.classList.toggle("focus-mode", nextState === "focus");
+
+      if (nextState === "edit") {
+        screenTitle.textContent = "编辑文章";
+        crumbMode.textContent = "编辑文章";
+        titleInput.value = "重构文章编辑器：让写作重新成为主角";
+        summaryInput.value = "这是一篇已经保存过的文章，右侧显示发布状态、标签、封面和检查清单。";
+        publishButton.textContent = "保存修改";
+        statusChip.textContent = "已发布";
+        editOnly.hidden = false;
+        return;
+      }
+
+      screenTitle.textContent = nextState === "focus" ? "沉浸写作" : "新建文章";
+      crumbMode.textContent = nextState === "focus" ? "沉浸写作" : "新建文章";
+      titleInput.value = nextState === "focus" ? "重构文章编辑器：让写作重新成为主角" : "";
+      summaryInput.value = nextState === "focus" ? "沉浸模式隐藏发布和导航信息，只保留纸面与工具条。" : "";
+      publishButton.textContent = "发布";
+      statusChip.textContent = "草稿";
+      editOnly.hidden = true;
+    }
+
+    stateButtons.forEach((button) => {
+      button.addEventListener("click", () => setState(button.dataset.state));
+    });
+
+    focusToggle.addEventListener("click", () => setState("focus"));
+  </script>
+</body>
+</html>

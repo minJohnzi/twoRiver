@@ -26,7 +26,6 @@ import {
   type MouseEvent,
   Suspense,
   lazy,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -50,7 +49,7 @@ import {
 } from "../api/admin";
 import type { MarkdownPreviewProps } from "../components/MarkdownPreview";
 import type { ArticleEditorProps } from "../editor/ArticleEditor";
-import { ArticleFormatActions } from "../editor/ArticleFormatActions";
+import { ArticleLocaleTabs } from "../editor/ArticleLocaleTabs";
 import { useArticleImageUpload } from "../editor/useArticleImageUpload";
 import { useUnsavedArticleWarning } from "../editor/useUnsavedArticleWarning";
 import { getTaxonomyDisplayName, getTaxonomySearchText } from "../utils/taxonomy";
@@ -83,7 +82,9 @@ interface MarkdownHeading {
   id: string;
   level: number;
   text: string;
-  lineStart: number;
+  lineStart?: number;
+  targetId?: string;
+  headingIndex?: number;
 }
 
 interface SearchMatch {
@@ -327,6 +328,13 @@ function createTiptapDraft(overrides: Partial<TranslationDraft> = {}): Translati
 }
 
 function cloneTranslations(): TranslationDrafts {
+  if (isTiptapNewArticleEnabled()) {
+    return {
+      zh: createTiptapDraft(),
+      en: createTiptapDraft()
+    };
+  }
+
   return {
     zh: createMarkdownDraft(),
     en: createMarkdownDraft()
@@ -785,6 +793,47 @@ function collectMarkdownHeadings(markdown: string): MarkdownHeading[] {
   return headings;
 }
 
+function collectArticleDocumentHeadings(document: ArticleDocument | null): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
+  let headingIndex = 0;
+
+  function visit(node: ArticleNode) {
+    if (node.type === "heading") {
+      const level = typeof node.attrs?.level === "number" ? node.attrs.level : 0;
+      const text = articleNodeText(node).trim();
+      const targetId = typeof node.attrs?.id === "string" ? node.attrs.id : "";
+
+      if (level >= 2 && level <= 4 && text && targetId) {
+        headings.push({
+          id: targetId,
+          level,
+          text,
+          targetId,
+          headingIndex
+        });
+        headingIndex += 1;
+      }
+    }
+
+    for (const child of node.content ?? []) {
+      visit(child);
+    }
+  }
+
+  if (document) {
+    visit(document);
+  }
+
+  return headings;
+}
+
+function articleNodeText(node: ArticleNode): string {
+  if (typeof node.text === "string") {
+    return node.text;
+  }
+  return (node.content ?? []).map(articleNodeText).join("");
+}
+
 function findSearchMatches(markdown: string, query: string): SearchMatch[] {
   const needle = query.trim();
   if (!needle) {
@@ -855,6 +904,12 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
   );
   const [editorMode, setEditorMode] = useState<MarkdownEditorMode>("split");
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [isOutlineOpen, setIsOutlineOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(() =>
+    typeof window === "undefined" || typeof window.matchMedia !== "function"
+      ? true
+      : window.matchMedia("(min-width: 1081px)").matches
+  );
   const [markdownSearch, setMarkdownSearch] = useState<MarkdownSearchState>(EMPTY_SEARCH_STATE);
   const [tiptapEditorErrors, setTiptapEditorErrors] = useState<Partial<Record<Locale, string>>>({});
   const [isLoading, setIsLoading] = useState(Boolean(postId));
@@ -1354,6 +1409,36 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       setEditorMode("split");
     }
     selectMarkdownRange(offset, offset);
+  }
+
+  function jumpToOutlineHeading(heading: MarkdownHeading) {
+    if (isActiveTiptap && heading.targetId) {
+      const targetId = heading.targetId;
+      window.requestAnimationFrame(() => {
+        const surface = document.querySelector<HTMLElement>(".article-rich-editor__surface");
+        const editorHeadings = surface
+          ? Array.from(surface.querySelectorAll<HTMLElement>("h2,h3,h4"))
+          : [];
+        const targetById = document.getElementById(targetId);
+        const target =
+          targetById && surface?.contains(targetById)
+            ? targetById
+            : heading.headingIndex !== undefined
+              ? editorHeadings[heading.headingIndex]
+              : editorHeadings.find((candidate) => candidate.textContent?.trim() === heading.text);
+        if (!surface || !target || !surface.contains(target)) {
+          return;
+        }
+
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        surface.focus({ preventScroll: true });
+        target.classList.add("is-outline-target");
+        window.setTimeout(() => target.classList.remove("is-outline-target"), 1200);
+      });
+      return;
+    }
+
+    jumpToMarkdownOffset(heading.lineStart ?? 0);
   }
 
   async function savePost(nextStatus: PostStatus, action: NonNullable<SaveAction>) {
@@ -1928,8 +2013,24 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       : activeFormatDialog === "restore-markdown"
         ? conversionAction === "restore"
         : false;
-  const deferredMarkdown = useDeferredValue(currentTranslation.contentMarkdown);
   const markdownHeadings = useMemo(() => collectMarkdownHeadings(currentTranslation.contentMarkdown), [currentTranslation.contentMarkdown]);
+  const tiptapHeadings = useMemo(() => collectArticleDocumentHeadings(currentArticleDocument), [currentArticleDocument]);
+  const editorOutlineItems = useMemo(
+    () => (isActiveTiptap ? tiptapHeadings : markdownHeadings.filter((heading) => heading.level >= 2 && heading.level <= 4)).slice(0, 8),
+    [isActiveTiptap, markdownHeadings, tiptapHeadings]
+  );
+  const editorResourceStats = useMemo(() => {
+    const markdown = currentTranslation.contentMarkdown;
+    const serializedContent = currentTranslation.content.format === "tiptap" ? JSON.stringify(currentTranslation.content.doc) : markdown;
+
+    return {
+      images: (serializedContent.match(/"type":"image"|!\[[^\]]*]\(/g) ?? []).length,
+      codeBlocks: (serializedContent.match(/"type":"codeBlock"|```/g) ?? []).length,
+      tables: (serializedContent.match(/"type":"table"|\n\|.+\|\n/g) ?? []).length,
+      mermaid: (serializedContent.match(/mermaid/g) ?? []).length
+    };
+  }, [currentTranslation.content, currentTranslation.contentMarkdown]);
+  const targetLocale = otherLocale(activeLocale);
   const editorStats = useMemo(() => {
     const body = currentTranslation.contentMarkdown.trim();
     const words = body ? body.split(/\s+/).filter(Boolean).length : 0;
@@ -1944,12 +2045,33 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
       readingMinutes
     };
   }, [activeLocale, currentTranslation.contentMarkdown]);
+  const composerQualityChecks = [
+    {
+      label: locale === "zh" ? "标题" : "Title",
+      done: Boolean(currentTranslation.title.trim())
+    },
+    {
+      label: locale === "zh" ? "摘要" : "Summary",
+      done: Boolean(currentTranslation.summary.trim())
+    },
+    {
+      label: "Slug",
+      done: Boolean(slug.trim())
+    },
+    {
+      label: locale === "zh" ? "分类或标签" : "Taxonomy",
+      done: true
+    },
+    {
+      label: locale === "zh" ? "正文" : "Body",
+      done: editorStats.characters > 0
+    }
+  ];
   const markdownSearchMatches = useMemo(
     () => findSearchMatches(currentTranslation.contentMarkdown, markdownSearch.query),
     [currentTranslation.contentMarkdown, markdownSearch.query]
   );
   const activeSearchIndex = markdownSearchMatches.length > 0 ? Math.min(markdownSearch.currentIndex, markdownSearchMatches.length - 1) : -1;
-  const targetLocale = otherLocale(activeLocale);
   const isBusy = Boolean(saveAction) || isDeleting || isTranslating || Boolean(conversionAction);
   const isFormatMutationPending = conversionAction === "convert" || conversionAction === "restore";
   const currentBaseline = useMemo(
@@ -2047,75 +2169,144 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
     <section className={`admin-editor${isFocusMode ? " is-focus-mode" : ""}`}>
       <form className="editor-shell" onSubmit={handleSubmit}>
         <fieldset className="editor-form-fields" disabled={isFormatMutationPending}>
-        <div className="editor-toolbar">
-          <div>
-            <p className="admin-kicker">Writing room</p>
-            <Link className="back-link" to="/admin/posts">
-              {locale === "zh" ? "返回文章管理" : "Back to posts"}
-            </Link>
-            <h1>{postId ? (locale === "zh" ? "编辑文章" : "Edit post") : locale === "zh" ? "新建文章" : "New post"}</h1>
-          </div>
-          <div className="editor-actions" aria-label={locale === "zh" ? "文章操作" : "Post actions"}>
-            {status === "draft" ? (
-              <>
-                <button className="secondary-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("draft", "draft")}>
-                  {saveAction === "draft" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存草稿" : "Save draft"}
-                </button>
+        <div className="article-workbench">
+          <header className="article-workbench__topbar">
+            <div className="article-workbench__identity">
+              <span className="article-workbench__mark" aria-hidden="true">TR</span>
+              <Link className="back-link" to="/admin/posts">
+                {locale === "zh" ? "返回文章管理" : "Back to posts"}
+              </Link>
+              <div>
+                <span>
+                  <Link to="/admin/posts">{locale === "zh" ? "文章管理" : "Posts"}</Link>
+                  {" / "}
+                  {postId ? (locale === "zh" ? "编辑文章" : "Edit post") : locale === "zh" ? "新建文章" : "New post"}
+                  {" / "}
+                  {isActiveTiptap ? (locale === "zh" ? "富文本" : "Rich text") : "Markdown"}
+                </span>
+                <h1>{postId ? (locale === "zh" ? "编辑文章" : "Edit post") : locale === "zh" ? "新建文章" : "New post"}</h1>
+              </div>
+            </div>
+            <div className="editor-actions" aria-label={locale === "zh" ? "文章操作" : "Post actions"}>
+              {canChooseNewArticleFormat ? (
                 <button
-                  className="primary-button"
+                  className="secondary-button article-format-switch"
                   type="button"
-                  disabled={isBusy || hasTiptapEditorError || tiptapPublishDisabled}
-                  title={publishDisabledTitle}
-                  onClick={() => void savePost("published", "publish")}
+                  aria-label={locale === "zh" ? "切换正文格式" : "Switch body format"}
+                  aria-pressed={currentTranslation.content.format === "tiptap"}
+                  title={
+                    currentTranslation.content.format === "markdown"
+                      ? locale === "zh"
+                        ? "切换为富文本"
+                        : "Switch to rich text"
+                      : locale === "zh"
+                        ? "切换为 Markdown"
+                        : "Switch to Markdown"
+                  }
+                  onClick={() => chooseActiveLocaleFormat(currentTranslation.content.format === "markdown" ? "tiptap" : "markdown")}
                 >
-                  {saveAction === "publish" ? (locale === "zh" ? "发布中..." : "Publishing...") : locale === "zh" ? "发布" : "Publish"}
+                  {currentTranslation.content.format === "markdown" ? "Markdown" : locale === "zh" ? "富文本" : "Rich text"}
                 </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={isBusy || hasTiptapEditorError || (status === "published" && tiptapPublishDisabled)}
-                  title={status === "published" ? publishDisabledTitle : undefined}
-                  onClick={() => void savePost(status, "save")}
-                >
-                  {saveAction === "save" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存修改" : "Save changes"}
-                </button>
-                {status === "published" ? (
-                  <button className="danger-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("hidden", "hide")}>
-                    {saveAction === "hide" ? (locale === "zh" ? "下架中..." : "Hiding...") : locale === "zh" ? "隐藏/下架" : "Hide"}
+              ) : null}
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={isBusy || Boolean(translationDisabledTitle)}
+                title={translationDisabledTitle}
+                onClick={requestTranslation}
+              >
+                {isTranslating ? (locale === "zh" ? "同步中..." : "Syncing...") : locale === "zh" ? "同步翻译" : "Sync translation"}
+              </button>
+              <button
+                className="secondary-button article-workbench__icon-action"
+                type="button"
+                aria-pressed={isOutlineOpen}
+                aria-label="Toggle outline and assets"
+                title="Outline and assets"
+                onClick={() => setIsOutlineOpen((current) => !current)}
+              >
+                Outline
+              </button>
+              <button
+                className="secondary-button article-workbench__icon-action"
+                type="button"
+                aria-pressed={isSettingsOpen}
+                aria-label="Toggle publish checklist"
+                title="Publish checklist"
+                onClick={() => setIsSettingsOpen((current) => !current)}
+              >
+                Panel
+              </button>
+              <button
+                className="secondary-button article-workbench__icon-action"
+                type="button"
+                aria-pressed={isFocusMode}
+                aria-label="Toggle focus writing mode"
+                title={isFocusMode ? "Exit focus mode" : "Focus writing"}
+                onClick={() => setIsFocusMode((current) => !current)}
+              >
+                {isFocusMode ? "Exit" : "Focus"}
+              </button>
+              {status === "draft" ? (
+                <>
+                  <button className="secondary-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("draft", "draft")}>
+                    {saveAction === "draft" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存草稿" : "Save draft"}
                   </button>
-                ) : (
                   <button
                     className="primary-button"
                     type="button"
                     disabled={isBusy || hasTiptapEditorError || tiptapPublishDisabled}
                     title={publishDisabledTitle}
-                    onClick={() => void savePost("published", "republish")}
+                    onClick={() => void savePost("published", "publish")}
                   >
-                    {saveAction === "republish" ? (locale === "zh" ? "重新发布中..." : "Republishing...") : locale === "zh" ? "重新发布/显示" : "Republish"}
+                    {saveAction === "publish" ? (locale === "zh" ? "发布中..." : "Publishing...") : locale === "zh" ? "发布" : "Publish"}
                   </button>
-                )}
-                {canPreview && status === "published" ? (
-                  <Link className="secondary-button" to={`/posts/${slug.trim()}`} target="_blank" rel="noreferrer">
-                    {locale === "zh" ? "预览" : "Preview"}
-                  </Link>
-                ) : null}
-                {canPreview && status === "hidden" ? (
-                  <button className="secondary-button" type="button" onClick={focusPreview}>
-                    {locale === "zh" ? "预览" : "Preview"}
+                </>
+              ) : (
+                <>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={isBusy || hasTiptapEditorError || (status === "published" && tiptapPublishDisabled)}
+                    title={status === "published" ? publishDisabledTitle : undefined}
+                    onClick={() => void savePost(status, "save")}
+                  >
+                    {saveAction === "save" ? (locale === "zh" ? "保存中..." : "Saving...") : locale === "zh" ? "保存修改" : "Save changes"}
                   </button>
-                ) : null}
-              </>
-            )}
-            {postId ? (
-              <button className="danger-button" type="button" disabled={isBusy} onClick={() => setIsDeleteDialogOpen(true)}>
-                {locale === "zh" ? "删除" : "Delete"}
-              </button>
-            ) : null}
-          </div>
-        </div>
+                  {status === "published" ? (
+                    <button className="danger-button" type="button" disabled={isBusy || hasTiptapEditorError} onClick={() => void savePost("hidden", "hide")}>
+                      {saveAction === "hide" ? (locale === "zh" ? "下架中..." : "Hiding...") : locale === "zh" ? "隐藏/下架" : "Hide"}
+                    </button>
+                  ) : (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={isBusy || hasTiptapEditorError || tiptapPublishDisabled}
+                      title={publishDisabledTitle}
+                      onClick={() => void savePost("published", "republish")}
+                    >
+                      {saveAction === "republish" ? (locale === "zh" ? "重新发布中..." : "Republishing...") : locale === "zh" ? "重新发布/显示" : "Republish"}
+                    </button>
+                  )}
+                  {canPreview && status === "published" ? (
+                    <Link className="secondary-button" to={`/posts/${slug.trim()}`} target="_blank" rel="noreferrer">
+                      {locale === "zh" ? "预览" : "Preview"}
+                    </Link>
+                  ) : null}
+                  {canPreview && status === "hidden" ? (
+                    <button className="secondary-button" type="button" onClick={focusPreview}>
+                      {locale === "zh" ? "预览" : "Preview"}
+                    </button>
+                  ) : null}
+                </>
+              )}
+              {postId ? (
+                <button className="danger-button" type="button" disabled={isBusy} onClick={() => setIsDeleteDialogOpen(true)}>
+                  {locale === "zh" ? "删除" : "Delete"}
+                </button>
+              ) : null}
+            </div>
+          </header>
 
         {actionNotice ? (
           <div
@@ -2132,188 +2323,56 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
           </div>
         ) : null}
 
-        <div className={`editor-grid editor-grid--${isActiveTiptap ? "split" : editorMode}`}>
-          <div className="editor-fields">
-            <div className="editor-card">
-              <div className="editor-card__heading">
-                <h2>{locale === "zh" ? "文章设置" : "Post settings"}</h2>
-                <span className={`status-pill status-pill--${status}`}>
-                  {statusLabel(status, locale)}
-                </span>
-              </div>
-              <p className="field-hint">{statusDescription(status, locale)}</p>
-              <label>
-                <span>Slug</span>
-                <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="my-technical-note" />
-              </label>
-              <p className="field-hint">
-                {locale === "zh"
-                  ? "只能使用小写英文字母、数字和连字符；留空会按标题、摘要、正文自动生成，并追加 -2、-3 避免重复。"
-                  : "Use lowercase letters, numbers, and hyphens only. Leave blank to generate one from the title, summary, or body, with -2/-3 added when needed."}
-              </p>
-              <label>
-                <span>{locale === "zh" ? "分类" : "Category"}</span>
-                <select value={categorySlug} onChange={(event) => setCategorySlug(event.target.value)}>
-                  <option value="">{locale === "zh" ? "不设置分类" : "No category"}</option>
-                  {categories.map((category) => (
-                    <option key={category.slug} value={category.slug}>
-                      {getTaxonomyDisplayName(category, locale)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="editor-tag-selector" aria-label={locale === "zh" ? "标签选择器" : "Tag selector"}>
-                <div className="editor-tag-selector__heading">
-                  <span>{locale === "zh" ? "标签" : "Tags"}</span>
-                  <small>
-                    {locale === "zh"
-                      ? "搜索已有标签，多选后保存；新标签需要先创建。"
-                      : "Search existing tags, select multiple, and create new tags deliberately."}
-                  </small>
-                </div>
-
-                <div className="editor-selected-tags" aria-label={locale === "zh" ? "已选标签" : "Selected tags"}>
-                  {selectedTags.length > 0 ? (
-                    selectedTags.map((tag) => {
-                      const displayName = getTaxonomyDisplayName(tag, locale);
-
-                      return (
-                        <button
-                          className="editor-tag-chip"
-                          type="button"
-                          key={tag.slug}
-                          aria-label={locale === "zh" ? `移除 ${displayName}` : `Remove ${displayName}`}
-                          onClick={() => removeSelectedTagSlug(tag.slug)}
-                        >
-                          <span>{displayName}</span>
-                          <code>/{tag.slug}</code>
-                          <i aria-hidden="true">×</i>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <span className="editor-selected-tags__empty">{locale === "zh" ? "尚未选择标签" : "No tags selected"}</span>
-                  )}
-                </div>
-
-                <label>
-                  <span>{locale === "zh" ? "搜索标签" : "Search tags"}</span>
-                  <input
-                    type="search"
-                    value={tagSearch}
-                    onChange={(event) => setTagSearch(event.target.value)}
-                    placeholder={locale === "zh" ? "输入名称或 slug" : "Search by name or slug"}
-                  />
-                </label>
-
-                <div className="editor-tag-options" aria-label={locale === "zh" ? "可选标签" : "Available tags"}>
-                  {filteredTags.length > 0 ? (
-                    filteredTags.map((tag) => {
-                      const isSelected = selectedTagSlugs.includes(tag.slug);
-                      const displayName = getTaxonomyDisplayName(tag, locale);
-
-                      return (
-                        <button
-                          className={isSelected ? "editor-tag-option is-selected" : "editor-tag-option"}
-                          type="button"
-                          key={tag.slug}
-                          aria-pressed={isSelected}
-                          aria-label={locale === "zh" ? `${isSelected ? "已选" : "选择"} ${displayName}` : `${isSelected ? "Selected" : "Select"} ${displayName}`}
-                          onClick={() => (isSelected ? removeSelectedTagSlug(tag.slug) : addSelectedTagSlug(tag.slug))}
-                        >
-                          <span>{displayName}</span>
-                          <code>/{tag.slug}</code>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="field-hint">{locale === "zh" ? "没有匹配标签，可在下方创建。" : "No matching tags. Create one below."}</p>
-                  )}
-                </div>
-
-                <div className="editor-tag-create" aria-label={locale === "zh" ? "快速创建标签" : "Quick create tag"}>
-                  <label>
-                    <span>{locale === "zh" ? "新标签名称" : "New tag name"}</span>
-                    <input
-                      value={quickTagName}
-                      onChange={(event) => updateQuickTagName(event.target.value)}
-                      placeholder={locale === "zh" ? "边缘运行时" : "Edge Runtime"}
-                    />
-                  </label>
-                  <label>
-                    <span>{locale === "zh" ? "新标签 slug" : "New tag slug"}</span>
-                    <input
-                      value={quickTagSlug}
-                      onChange={(event) => updateQuickTagSlug(event.target.value)}
-                      placeholder="edge-runtime"
-                    />
-                  </label>
-                  <button className="secondary-button" type="button" disabled={isCreatingTag} onClick={() => void createAndSelectTag()}>
-                    {isCreatingTag
-                      ? locale === "zh"
-                        ? "创建中..."
-                        : "Creating..."
-                      : locale === "zh"
-                        ? "创建并选中标签"
-                        : "Create and select tag"}
-                  </button>
-                </div>
-
-                {tagSelectorError ? (
-                  <p className="error-text" role="alert">
-                    {tagSelectorError}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="editor-card editor-card--writing">
-              <div className="editor-card__heading editor-card__heading--stacked">
-                <div>
-                  <p className="editor-terminal-kicker">{isFocusMode ? "Zen Mode: Writing Space" : "Markdown Writing Terminal"}</p>
-                  <h2>{locale === "zh" ? "正文内容" : "Writing"}</h2>
-                </div>
-                <div className="editor-writing-tools">
-                  <div className="language-tabs" role="tablist" aria-label="Editor language">
-                    {(["zh", "en"] as const).map((translationLocale) => (
-                      <button
-                        type="button"
-                        key={translationLocale}
-                        className={activeLocale === translationLocale ? "is-active" : undefined}
-                        onClick={() => setActiveLocale(translationLocale)}
-                      >
-                        {translationLocale === "zh" ? "中文" : "EN"}
+        <div className={`article-workbench__body article-workbench__body--${isActiveTiptap ? "source" : editorMode}${isOutlineOpen ? " is-outline-open" : ""}${isSettingsOpen ? "" : " is-settings-collapsed"}`}>
+          {isOutlineOpen ? (
+            <button
+              className="article-workbench__drawer-scrim"
+              type="button"
+              aria-label="Close outline and assets"
+              onClick={() => setIsOutlineOpen(false)}
+            />
+          ) : null}
+          <aside className="article-workbench__left" aria-label={locale === "zh" ? "写作导航" : "Writing navigation"}>
+            <section className="article-workbench__left-section">
+              <h2>{locale === "zh" ? "大纲" : "Outline"}</h2>
+              {editorOutlineItems.length > 0 ? (
+                <ol className="article-workbench__outline">
+                  {editorOutlineItems.map((heading) => (
+                    <li key={heading.id} className={`heading-level-${heading.level}`}>
+                      <button type="button" onClick={() => jumpToOutlineHeading(heading)}>
+                        {heading.text}
                       </button>
-                    ))}
-                  </div>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isBusy || Boolean(translationDisabledTitle)}
-                    title={translationDisabledTitle}
-                    onClick={requestTranslation}
-                  >
-                    {isTranslating
-                      ? locale === "zh"
-                        ? "翻译中..."
-                        : "Translating..."
-                      : locale === "zh"
-                        ? `翻译为${languageLabel(targetLocale, locale)}`
-                        : `Translate to ${languageLabel(targetLocale, locale)}`}
-                  </button>
-                  <button className="secondary-button editor-focus-toggle" type="button" onClick={() => setIsFocusMode((current) => !current)}>
-                    {isFocusMode ? (locale === "zh" ? "退出沉浸" : "Exit focus") : locale === "zh" ? "沉浸写作" : "Focus"}
-                  </button>
-                </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p>{locale === "zh" ? "添加 H2-H4 后生成大纲。" : "Add H2-H4 headings to build the outline."}</p>
+              )}
+            </section>
+            <section className="article-workbench__left-section">
+              <h2>{locale === "zh" ? "资源" : "Assets"}</h2>
+              <div className="article-workbench__resource-list">
+                <span><strong>{editorResourceStats.images}</strong>{locale === "zh" ? " 张图片" : " images"}</span>
+                <span><strong>{editorResourceStats.codeBlocks}</strong>{locale === "zh" ? " 个代码片段" : " code blocks"}</span>
+                <span><strong>{editorResourceStats.tables}</strong>{locale === "zh" ? " 个表格" : " tables"}</span>
+                <span><strong>{editorResourceStats.mermaid}</strong> Mermaid</span>
               </div>
-
-              <div className="editor-writing-stats" aria-label={locale === "zh" ? "正文统计" : "Writing stats"}>
-                <span><strong>{editorStats.characters}</strong>{locale === "zh" ? "字符" : "chars"}</span>
-                <span><strong>{editorStats.paragraphs}</strong>{locale === "zh" ? "段落" : "paragraphs"}</span>
-                <span><strong>{markdownHeadings.length}</strong>{locale === "zh" ? "标题" : "headings"}</span>
-                <span><strong>{editorStats.readingMinutes}</strong>{locale === "zh" ? "分钟阅读" : "min read"}</span>
+            </section>
+          </aside>
+          <main className="article-workbench__main">
+            <article className="editor-card editor-card--writing article-workbench__paper">
+              <div className="article-workbench__paper-tools">
+                <button className="secondary-button editor-focus-toggle" type="button" onClick={() => setIsOutlineOpen((current) => !current)}>
+                  Outline
+                </button>
+                <ArticleLocaleTabs activeLocale={activeLocale} onChange={setActiveLocale} />
+                <button className="secondary-button editor-focus-toggle" type="button" onClick={() => setIsFocusMode((current) => !current)}>
+                  {isFocusMode ? (locale === "zh" ? "退出沉浸" : "Exit focus") : locale === "zh" ? "沉浸写作" : "Focus"}
+                </button>
+                <button className="secondary-button editor-focus-toggle" type="button" onClick={() => setIsSettingsOpen((current) => !current)}>
+                  Panel
+                </button>
               </div>
-
               {isTranslating ? (
                 <div className="translation-progress" role="status" aria-label="Translation progress" aria-live="polite">
                   <div>
@@ -2330,21 +2389,28 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 </div>
               ) : null}
 
-              <label>
+              <div className="article-workbench__page-title" aria-label={locale === "zh" ? "页面标题" : "Page title"}>
+                <button className="article-workbench__page-icon" type="button" aria-label={locale === "zh" ? "文章图标" : "Page icon"}>
+                  TR
+                </button>
+              <label className="article-workbench__title-field">
                 <span>{locale === "zh" ? "标题" : "Title"}</span>
-                <input value={currentTranslation.title} onChange={(event) => updateTranslation("title", event.target.value)} />
-              </label>
-              <label>
-                <span>{locale === "zh" ? "摘要" : "Summary"}</span>
-                <textarea value={currentTranslation.summary} onChange={(event) => updateTranslation("summary", event.target.value)} rows={3} />
-              </label>
-              {canChooseNewArticleFormat ? (
-                <ArticleFormatActions
-                  locale={locale}
-                  currentFormat={currentTranslation.content.format}
-                  onChooseFormat={chooseActiveLocaleFormat}
+                <input
+                  value={currentTranslation.title}
+                  onChange={(event) => updateTranslation("title", event.target.value)}
+                  placeholder={locale === "zh" ? "输入文章标题" : "Untitled post"}
                 />
-              ) : null}
+              </label>
+              <label className="article-workbench__summary-field">
+                <span>{locale === "zh" ? "摘要" : "Summary"}</span>
+                <textarea
+                  value={currentTranslation.summary}
+                  onChange={(event) => updateTranslation("summary", event.target.value)}
+                  rows={3}
+                  placeholder={locale === "zh" ? "用一两句话说明本文要解决的问题。" : "Write a concise summary for this article."}
+                />
+              </label>
+              </div>
               {postId && !isActiveTiptap ? (
                 <div className="article-conversion-panel" aria-label={locale === "zh" ? "文章格式转换" : "Article format conversion"}>
                   <div>
@@ -2413,30 +2479,26 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                       </button>
                     ))}
                   </div>
-                  <div className="markdown-outline-panel" aria-label={locale === "zh" ? "Markdown 大纲" : "Markdown outline"}>
-                    <div className="markdown-outline-panel__heading">
-                      <span>{locale === "zh" ? "标题大纲" : "Outline"}</span>
-                      <strong>{markdownHeadings.length}</strong>
-                    </div>
-                    {markdownHeadings.length > 0 ? (
+                  {markdownHeadings.length > 0 ? (
+                    <div className="markdown-outline-panel" aria-label={locale === "zh" ? "Markdown 大纲" : "Markdown outline"}>
+                      <div className="markdown-outline-panel__heading">
+                        <span>{locale === "zh" ? "标题大纲" : "Outline"}</span>
+                        <strong>{markdownHeadings.length}</strong>
+                      </div>
                       <ol className="markdown-outline-list">
                         {markdownHeadings.map((heading) => (
                           <li key={heading.id} className={`heading-level-${heading.level}`}>
-                            <button type="button" onClick={() => jumpToMarkdownOffset(heading.lineStart)}>
+                            <button type="button" onClick={() => jumpToMarkdownOffset(heading.lineStart ?? 0)}>
                               {heading.text}
                             </button>
                           </li>
                         ))}
                       </ol>
-                    ) : (
-                      <p className="field-hint">
-                        {locale === "zh" ? "添加 # 标题后会生成大纲。" : "Add # headings to build an outline."}
-                      </p>
-                    )}
-                  </div>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
-              {!isActiveTiptap && editorMode !== "preview" ? (
+              {!isActiveTiptap ? (
                 <div className="editor-field editor-field--markdown-source">
                 <div className="markdown-control-row">
                   <span>Markdown body</span>
@@ -2564,33 +2626,213 @@ export function AdminEditorPage({ locale }: AdminEditorPageProps) {
                 )
               ) : null}
 
+              <div className="sync-command" aria-label={locale === "zh" ? "同步翻译" : "Sync translation"}>
+                <span className="chip blue" aria-hidden="true">AI</span>
+                <input
+                  readOnly
+                  value={`${languageLabel(activeLocale, locale)} -> ${languageLabel(targetLocale, locale)}`}
+                  aria-label={locale === "zh" ? "同步翻译目标" : "Sync translation target"}
+                />
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={isBusy || Boolean(translationDisabledTitle)}
+                  title={translationDisabledTitle}
+                  aria-busy={isTranslating}
+                  onClick={requestTranslation}
+                >
+                  {locale === "zh" ? "同步翻译" : "Sync"}
+                </button>
+              </div>
+
               {translationWarnings.length > 0 ? (
                 <p className="warning-text">
                   {locale === "zh" ? "翻译已生成，请检查：" : "Translation generated. Review: "} {translationWarnings.join(" ")}
                 </p>
               ) : null}
               {error ? <p className="error-text">{error}</p> : null}
-            </div>
-          </div>
+            </article>
+          </main>
 
-          {isActiveTiptap || editorMode !== "source" ? (
-            <aside ref={previewPaneRef} id="editor-preview" className={`preview-pane preview-pane--${isActiveTiptap ? "split" : editorMode}`} tabIndex={-1}>
-            <div className="preview-pane__heading">
-              <span>{locale === "zh" ? "预览" : "Preview"}</span>
-              <strong>{languageLabel(activeLocale, locale)}</strong>
-            </div>
-            <Suspense fallback={<EditorSurfaceFallback message={formatCopy.loadingPreview} />}>
-              <LazyMarkdownPreview
-                translation={{
-                  locale: activeLocale,
-                  content: currentTranslation.content,
-                  contentMarkdown: isActiveTiptap ? currentTranslation.contentMarkdown : deferredMarkdown
-                }}
-                locale={locale}
-              />
-            </Suspense>
-            </aside>
-          ) : null}
+          <aside className="article-workbench__meta" aria-label={locale === "zh" ? "文章设置" : "Article settings"}>
+              <section className="article-workbench__panel">
+                <div className="editor-card__heading">
+                  <h2>{locale === "zh" ? "发布" : "Publish"}</h2>
+                  <span className={`status-pill status-pill--${status}`}>
+                    {statusLabel(status, locale)}
+                  </span>
+                </div>
+                <p className="field-hint">{statusDescription(status, locale)}</p>
+                <div className="article-workbench__chip-row">
+                  <span className={isDirty ? "chip blue" : "chip"}>{isDirty ? (locale === "zh" ? "有改动" : "Unsaved") : (locale === "zh" ? "已同步" : "Saved")}</span>
+                  <span className={isActiveTiptap ? "chip blue" : "chip"}>{isActiveTiptap ? "TipTap" : "Markdown"}</span>
+                  <span className={tiptapPublishDisabled ? "chip is-warning" : "chip"}>{tiptapPublishDisabled ? (locale === "zh" ? "发布闸门关闭" : "Gate closed") : (locale === "zh" ? "可保存" : "Ready")}</span>
+                </div>
+              </section>
+
+              <section className="article-workbench__panel">
+                <h2>{locale === "zh" ? "文章信息" : "Article info"}</h2>
+              <label>
+                <span>Slug</span>
+                <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="my-technical-note" />
+              </label>
+              <p className="field-hint">
+                {locale === "zh"
+                  ? "只能使用小写英文字母、数字和连字符；留空会按标题、摘要、正文自动生成，并追加 -2、-3 避免重复。"
+                  : "Use lowercase letters, numbers, and hyphens only. Leave blank to generate one from the title, summary, or body, with -2/-3 added when needed."}
+              </p>
+              <label>
+                <span>{locale === "zh" ? "分类" : "Category"}</span>
+                <select value={categorySlug} onChange={(event) => setCategorySlug(event.target.value)}>
+                  <option value="">{locale === "zh" ? "不设置分类" : "No category"}</option>
+                  {categories.map((category) => (
+                    <option key={category.slug} value={category.slug}>
+                      {getTaxonomyDisplayName(category, locale)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="editor-tag-selector" aria-label={locale === "zh" ? "标签选择器" : "Tag selector"}>
+                <div className="editor-tag-selector__heading">
+                  <span>{locale === "zh" ? "标签" : "Tags"}</span>
+                  <small>
+                    {locale === "zh"
+                      ? "搜索已有标签，多选后保存；新标签需要先创建。"
+                      : "Search existing tags, select multiple, and create new tags deliberately."}
+                  </small>
+                </div>
+
+                <div className="editor-selected-tags" aria-label={locale === "zh" ? "已选标签" : "Selected tags"}>
+                  {selectedTags.length > 0 ? (
+                    selectedTags.map((tag) => {
+                      const displayName = getTaxonomyDisplayName(tag, locale);
+
+                      return (
+                        <button
+                          className="editor-tag-chip"
+                          type="button"
+                          key={tag.slug}
+                          aria-label={locale === "zh" ? `移除 ${displayName}` : `Remove ${displayName}`}
+                          onClick={() => removeSelectedTagSlug(tag.slug)}
+                        >
+                          <span>{displayName}</span>
+                          <code>/{tag.slug}</code>
+                          <i aria-hidden="true">×</i>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="editor-selected-tags__empty">{locale === "zh" ? "尚未选择标签" : "No tags selected"}</span>
+                  )}
+                </div>
+
+                <label>
+                  <span>{locale === "zh" ? "搜索标签" : "Search tags"}</span>
+                  <input
+                    type="search"
+                    value={tagSearch}
+                    onChange={(event) => setTagSearch(event.target.value)}
+                    placeholder={locale === "zh" ? "输入名称或 slug" : "Search by name or slug"}
+                  />
+                </label>
+
+                <div className="editor-tag-options" aria-label={locale === "zh" ? "可选标签" : "Available tags"}>
+                  {filteredTags.length > 0 ? (
+                    filteredTags.map((tag) => {
+                      const isSelected = selectedTagSlugs.includes(tag.slug);
+                      const displayName = getTaxonomyDisplayName(tag, locale);
+
+                      return (
+                        <button
+                          className={isSelected ? "editor-tag-option is-selected" : "editor-tag-option"}
+                          type="button"
+                          key={tag.slug}
+                          aria-pressed={isSelected}
+                          aria-label={locale === "zh" ? `${isSelected ? "已选" : "选择"} ${displayName}` : `${isSelected ? "Selected" : "Select"} ${displayName}`}
+                          onClick={() => (isSelected ? removeSelectedTagSlug(tag.slug) : addSelectedTagSlug(tag.slug))}
+                        >
+                          <span>{displayName}</span>
+                          <code>/{tag.slug}</code>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="field-hint">{locale === "zh" ? "没有匹配标签，可在下方创建。" : "No matching tags. Create one below."}</p>
+                  )}
+                </div>
+
+                <div className="editor-tag-create" aria-label={locale === "zh" ? "快速创建标签" : "Quick create tag"}>
+                  <label>
+                    <span>{locale === "zh" ? "新标签名称" : "New tag name"}</span>
+                    <input
+                      value={quickTagName}
+                      onChange={(event) => updateQuickTagName(event.target.value)}
+                      placeholder={locale === "zh" ? "边缘运行时" : "Edge Runtime"}
+                    />
+                  </label>
+                  <label>
+                    <span>{locale === "zh" ? "新标签 slug" : "New tag slug"}</span>
+                    <input
+                      value={quickTagSlug}
+                      onChange={(event) => updateQuickTagSlug(event.target.value)}
+                      placeholder="edge-runtime"
+                    />
+                  </label>
+                  <button className="secondary-button" type="button" disabled={isCreatingTag} onClick={() => void createAndSelectTag()}>
+                    {isCreatingTag
+                      ? locale === "zh"
+                        ? "创建中..."
+                        : "Creating..."
+                      : locale === "zh"
+                        ? "创建并选中标签"
+                        : "Create and select tag"}
+                  </button>
+                </div>
+
+                {tagSelectorError ? (
+                  <p className="error-text" role="alert">
+                    {tagSelectorError}
+                  </p>
+                ) : null}
+              </div>
+              </section>
+
+              <section className="article-workbench__panel">
+                <h2>{locale === "zh" ? "封面" : "Cover"}</h2>
+                <div className="cover-slot" aria-label={locale === "zh" ? "封面图" : "Cover image"}>
+                  {locale === "zh" ? "封面图" : "cover image"}
+                </div>
+                <p className="field-hint">
+                  {locale === "zh" ? "封面作为文章元信息保留，正文图片仍在编辑器内管理。" : "The cover stays with article metadata; body images remain in the editor."}
+                </p>
+              </section>
+
+              <section className="article-workbench__panel">
+                <h2>{locale === "zh" ? "当前块" : "Current block"}</h2>
+                <div className="mini-table" aria-label={locale === "zh" ? "当前编辑状态" : "Current editing state"}>
+                  <span>{locale === "zh" ? "语言" : "Locale"}</span>
+                  <strong>{languageLabel(activeLocale, locale)}</strong>
+                  <span>{locale === "zh" ? "目标" : "Target"}</span>
+                  <strong>{languageLabel(targetLocale, locale)}</strong>
+                  <span>{locale === "zh" ? "格式" : "Format"}</span>
+                  <strong>{isActiveTiptap ? "TipTap" : "Markdown"}</strong>
+                </div>
+              </section>
+
+              <section className="article-workbench__panel">
+                <h2>{locale === "zh" ? "验收清单" : "Checklist"}</h2>
+                <ul className="quality-list">
+                  {composerQualityChecks.map((check) => (
+                    <li key={check.label}>
+                      <span className={check.done ? "quality-dot is-done" : "quality-dot"} aria-hidden="true" />
+                      <strong>{check.label}</strong>
+                      <span>{check.done ? (locale === "zh" ? "完成" : "Done") : (locale === "zh" ? "待补齐" : "Pending")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+          </aside>
+        </div>
         </div>
         </fieldset>
       </form>

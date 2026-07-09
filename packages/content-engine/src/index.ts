@@ -18,7 +18,8 @@ export {
 export type { MarkdownConversionIssue, MarkdownConversionPreview } from "./markdownImport.js";
 export { normalizeProjectedMarkdown, projectArticleToMarkdown } from "./markdownProjection.js";
 export { ArticleHtmlRenderError, renderArticleHtml } from "./renderArticleHtml.js";
-export { isAllowedImage, isAllowedLink } from "./urlPolicy.js";
+export { classifyArticleLink, isAllowedImage, isAllowedLink } from "./urlPolicy.js";
+export type { ArticleLinkKind } from "./urlPolicy.js";
 export { migrateArticleDocument } from "./migrations/v1.js";
 export { normalizeArticleDocument } from "./normalizeDocument.js";
 export {

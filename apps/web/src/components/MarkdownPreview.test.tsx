@@ -92,4 +92,12 @@ describe("MarkdownPreview", () => {
     expect(container.querySelector("a")?.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
     expect(screen.getByText("<script>alert(1)</script>")).toBeInTheDocument();
   });
+
+  it("renders external markdown links with safe window isolation and keeps relative links in-place", () => {
+    render(<MarkdownPreview markdown={"[External](https://example.com)\n\n[Internal](/posts/demo)"} />);
+
+    expect(screen.getByRole("link", { name: "External" })).toHaveAttribute("target", "_blank");
+    expect(screen.getByRole("link", { name: "External" })).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "Internal" })).not.toHaveAttribute("target");
+  });
 });

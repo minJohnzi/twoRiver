@@ -38,7 +38,7 @@ test("admin can convert a markdown draft, translate the TipTap draft, and publis
   await expect(articleBody).toContainText("Rollout content.");
   await expect(page.getByRole("button", { name: "Restore Markdown snapshot" })).toBeVisible();
 
-  const translateButton = page.getByRole("button", { name: "Translate to Chinese" });
+  const translateButton = page.getByRole("button", { name: "Sync translation" });
   await translateButton.scrollIntoViewIfNeeded();
   await expect(translateButton).toBeEnabled();
   await translateButton.click();

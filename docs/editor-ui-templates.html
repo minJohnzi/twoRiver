@@ -1,0 +1,1393 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TwoRiver Editor UI Templates</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --soft: #f5f7fb;
+        --line: #d9e0ea;
+        --panel: #ffffff;
+        --blue: #4157d8;
+        --teal: #0f8b8d;
+        --green: #147d64;
+        --amber: #a75f00;
+        --rose: #b4234b;
+        --shadow: 0 18px 44px rgba(22, 32, 51, 0.1);
+        font-family:
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "Noto Sans SC",
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #eef2f7;
+        color: var(--ink);
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      .page {
+        display: grid;
+        gap: 28px;
+        padding: 28px;
+      }
+
+      .template-nav {
+        position: sticky;
+        z-index: 20;
+        top: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: rgba(238, 242, 247, 0.92);
+        padding: 12px 0;
+        backdrop-filter: blur(16px);
+      }
+
+      .template-nav a {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--ink);
+        padding: 8px 12px;
+        text-decoration: none;
+      }
+
+      .template {
+        display: grid;
+        gap: 14px;
+      }
+
+      .template-title {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: baseline;
+        justify-content: space-between;
+      }
+
+      .template-title h1 {
+        margin: 0;
+        font-size: 22px;
+        letter-spacing: 0;
+      }
+
+      .template-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .chrome {
+        min-height: 760px;
+        overflow: hidden;
+        border: 1px solid #cfd7e3;
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) auto;
+        gap: 16px;
+        align-items: center;
+        min-height: 56px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.96);
+        padding: 10px 18px;
+      }
+
+      .brandline {
+        display: flex;
+        min-width: 0;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .brandmark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 7px;
+        background: #172033;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .crumbs {
+        display: grid;
+        min-width: 0;
+        gap: 2px;
+      }
+
+      .crumbs span {
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .crumbs strong {
+        overflow: hidden;
+        font-size: 14px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .actions,
+      .toolbar,
+      .segmented,
+      .inline-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .btn,
+      .tool,
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fff;
+        color: var(--ink);
+        padding: 0 10px;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .tool {
+        width: 32px;
+        padding: 0;
+        font-weight: 750;
+      }
+
+      .primary {
+        border-color: #172033;
+        background: #172033;
+        color: #fff;
+      }
+
+      .blue {
+        border-color: #d9ddff;
+        background: #f0f2ff;
+        color: var(--blue);
+      }
+
+      .green {
+        border-color: #c7eee3;
+        background: #effaf6;
+        color: var(--green);
+      }
+
+      .muted-button {
+        background: #f8fafc;
+        color: var(--muted);
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr) 320px;
+        min-height: 704px;
+      }
+
+      .sidebar,
+      .inspector {
+        border-right: 1px solid var(--line);
+        background: #fbfcfe;
+        padding: 16px;
+      }
+
+      .inspector {
+        border-right: 0;
+        border-left: 1px solid var(--line);
+      }
+
+      .panel-section {
+        display: grid;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding: 0 0 16px;
+        margin: 0 0 16px;
+      }
+
+      .panel-section:last-child {
+        border-bottom: 0;
+        margin-bottom: 0;
+      }
+
+      .panel-section h2 {
+        margin: 0;
+        font-size: 12px;
+        letter-spacing: 0;
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+      }
+
+      .field span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .field input,
+      .field textarea,
+      .field select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fff;
+        color: var(--ink);
+        padding: 8px 10px;
+      }
+
+      .canvas-wrap {
+        min-width: 0;
+        background: #f4f6fa;
+      }
+
+      .canvas-toolbar {
+        position: sticky;
+        z-index: 5;
+        top: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: center;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.92);
+        padding: 8px 14px;
+        backdrop-filter: blur(12px);
+      }
+
+      .paper {
+        width: min(920px, calc(100% - 56px));
+        min-height: 620px;
+        margin: 34px auto;
+        border: 1px solid #e4e8ef;
+        border-radius: 8px;
+        background: #fff;
+        padding: 58px 72px 80px;
+      }
+
+      .paper.compact {
+        padding: 42px 54px 64px;
+      }
+
+      .title-input {
+        border: 0;
+        outline: 0;
+        width: 100%;
+        color: var(--ink);
+        font-size: 42px;
+        font-weight: 760;
+        letter-spacing: 0;
+        line-height: 1.12;
+      }
+
+      .summary-input {
+        border: 0;
+        outline: 0;
+        width: 100%;
+        min-height: 74px;
+        margin-top: 16px;
+        color: #536075;
+        font-size: 18px;
+        line-height: 1.55;
+        resize: none;
+      }
+
+      .doc-body {
+        display: grid;
+        gap: 18px;
+        margin-top: 34px;
+        font-size: 17px;
+        line-height: 1.78;
+      }
+
+      .doc-body h2,
+      .doc-body h3 {
+        margin: 12px 0 0;
+        line-height: 1.25;
+      }
+
+      .doc-body p {
+        margin: 0;
+      }
+
+      .doc-body pre {
+        overflow: hidden;
+        border: 1px solid #cdd5e2;
+        border-radius: 8px;
+        background: #111827;
+        color: #e5e7eb;
+        margin: 0;
+      }
+
+      .code-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        padding: 8px 12px;
+        color: #a7b0bf;
+        font-size: 12px;
+      }
+
+      .code-head button {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f8fafc;
+      }
+
+      .doc-body code {
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+
+      .doc-body pre code {
+        display: block;
+        padding: 16px;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .callout {
+        display: grid;
+        grid-template-columns: 4px minmax(0, 1fr);
+        gap: 14px;
+        border: 1px solid #c7eee3;
+        border-radius: 8px;
+        background: #f2fbf8;
+        padding: 14px;
+      }
+
+      .callout::before {
+        content: "";
+        border-radius: 99px;
+        background: var(--green);
+      }
+
+      .outline-list {
+        display: grid;
+        gap: 7px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .outline-list a {
+        display: block;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 13px;
+        text-decoration: none;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .cover-slot {
+        display: grid;
+        min-height: 124px;
+        place-items: center;
+        border: 1px dashed #b7c1d0;
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(65, 87, 216, 0.16), transparent 42%),
+          linear-gradient(315deg, rgba(15, 139, 141, 0.2), transparent 44%),
+          #fff;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .split-workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(420px, 0.8fr);
+        min-height: 704px;
+      }
+
+      .preview {
+        border-left: 1px solid var(--line);
+        background: #fff;
+        padding: 34px;
+      }
+
+      .preview h2 {
+        margin-top: 0;
+      }
+
+      .block-rail {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+
+      .block-handle {
+        display: grid;
+        height: 30px;
+        place-items: center;
+        color: #98a2b3;
+        font-weight: 800;
+      }
+
+      .slash-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        border: 1px solid #d7dfea;
+        border-radius: 8px;
+        background: #fbfcff;
+        padding: 8px 10px;
+        color: #667085;
+      }
+
+      .command-menu {
+        width: 280px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 18px 34px rgba(22, 32, 51, 0.12);
+        padding: 8px;
+      }
+
+      .command-menu button {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 8px;
+        width: 100%;
+        align-items: center;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        padding: 8px;
+        color: var(--ink);
+        text-align: left;
+      }
+
+      .command-menu button:first-child {
+        background: #f0f2ff;
+      }
+
+      .ide-shell {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        min-height: 704px;
+        background: #0f172a;
+      }
+
+      .ide-nav {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        background: #111827;
+        padding: 16px;
+        color: #cbd5e1;
+      }
+
+      .ide-nav a {
+        border-radius: 7px;
+        color: inherit;
+        padding: 8px 10px;
+        text-decoration: none;
+      }
+
+      .ide-nav a.active {
+        background: rgba(255, 255, 255, 0.08);
+        color: #fff;
+      }
+
+      .ide-main {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+
+      .ide-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        background: #0b1120;
+        padding: 10px 14px;
+      }
+
+      .ide-toolbar .tool,
+      .ide-toolbar .btn {
+        border-color: rgba(148, 163, 184, 0.26);
+        background: rgba(255, 255, 255, 0.05);
+        color: #dbe4f0;
+      }
+
+      .ide-editor-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 330px;
+        min-height: 0;
+      }
+
+      .ide-paper {
+        min-width: 0;
+        padding: 36px;
+        color: #dbe4f0;
+      }
+
+      .ide-paper input {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: #f8fafc;
+        font-size: 34px;
+        font-weight: 750;
+        outline: 0;
+      }
+
+      .ide-paper textarea {
+        width: 100%;
+        min-height: 440px;
+        border: 0;
+        background: transparent;
+        color: #cbd5e1;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 15px;
+        line-height: 1.8;
+        outline: 0;
+        resize: none;
+      }
+
+      .ide-inspector {
+        border-left: 1px solid rgba(255, 255, 255, 0.1);
+        background: #111827;
+        color: #cbd5e1;
+        padding: 16px;
+      }
+
+      .ide-inspector .field input,
+      .ide-inspector .field select {
+        border-color: rgba(148, 163, 184, 0.24);
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+
+      .publish-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        min-height: 704px;
+        background: #f7f8fb;
+      }
+
+      .publish-main {
+        min-width: 0;
+        padding: 34px;
+      }
+
+      .publish-card {
+        display: grid;
+        gap: 18px;
+        max-width: 940px;
+        margin: 0 auto;
+      }
+
+      .cover-wide {
+        min-height: 220px;
+        border: 1px solid #d9e0ea;
+        border-radius: 8px;
+        background:
+          linear-gradient(120deg, rgba(20, 125, 100, 0.22), transparent 48%),
+          linear-gradient(300deg, rgba(167, 95, 0, 0.18), transparent 46%),
+          #ffffff;
+      }
+
+      .publish-aside {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+        border-left: 1px solid var(--line);
+        background: #fff;
+        padding: 18px;
+      }
+
+      .checklist {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .checklist li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 10px;
+        font-size: 13px;
+      }
+
+      .composer-complete .chrome {
+        min-height: 840px;
+      }
+
+      .composer-complete .workspace {
+        min-height: 784px;
+      }
+
+      .composer-complete .canvas-toolbar {
+        justify-content: space-between;
+      }
+
+      .toolbar-left,
+      .toolbar-right {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .block-stack {
+        display: grid;
+        gap: 18px;
+        margin-top: 34px;
+        font-size: 17px;
+        line-height: 1.78;
+      }
+
+      .block-card {
+        position: relative;
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        border-radius: 8px;
+      }
+
+      .block-card:hover {
+        background: linear-gradient(90deg, rgba(65, 87, 216, 0.05), transparent 42%);
+      }
+
+      .block-card h2,
+      .block-card h3,
+      .block-card p {
+        margin: 0;
+      }
+
+      .block-card h2 {
+        margin-bottom: 8px;
+        font-size: 26px;
+      }
+
+      .block-card h3 {
+        margin-bottom: 6px;
+        font-size: 20px;
+      }
+
+      .bubble-toolbar {
+        position: absolute;
+        z-index: 6;
+        top: -42px;
+        left: 72px;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        border: 1px solid #cfd7e3;
+        border-radius: 8px;
+        background: #172033;
+        box-shadow: 0 14px 30px rgba(22, 32, 51, 0.24);
+        padding: 5px;
+      }
+
+      .bubble-toolbar .tool,
+      .bubble-toolbar .btn {
+        min-height: 28px;
+        border-color: rgba(255, 255, 255, 0.12);
+        background: transparent;
+        color: #fff;
+        font-size: 12px;
+      }
+
+      .sync-command {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        width: min(660px, 100%);
+        border: 1px solid #cfd7e3;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 18px 34px rgba(22, 32, 51, 0.14);
+        margin: 28px auto 0;
+        padding: 10px 12px;
+      }
+
+      .sync-command input {
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        color: var(--ink);
+      }
+
+      .translation-dock {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .translation-card {
+        display: grid;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+      }
+
+      .translation-card strong {
+        font-size: 13px;
+      }
+
+      .translation-card span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .mini-table {
+        overflow: hidden;
+        border: 1px solid #cdd5e2;
+        border-radius: 8px;
+      }
+
+      .mini-table table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      .mini-table th,
+      .mini-table td {
+        border-bottom: 1px solid #e4e8ef;
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      .mini-table th {
+        background: #f8fafc;
+      }
+
+      .mini-table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .media-row {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
+        border: 1px solid #d9e0ea;
+        border-radius: 8px;
+        background: #fbfcfe;
+        padding: 12px;
+      }
+
+      .media-thumb {
+        min-height: 92px;
+        border: 1px dashed #b7c1d0;
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(65, 87, 216, 0.18), transparent 45%),
+          linear-gradient(315deg, rgba(20, 125, 100, 0.22), transparent 48%),
+          #fff;
+      }
+
+      .block-status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .quality-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .quality-list li {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 9px 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .quality-list strong {
+        color: var(--green);
+      }
+
+      @media (max-width: 1180px) {
+        .workspace,
+        .split-workspace,
+        .publish-layout,
+        .ide-editor-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar,
+        .inspector,
+        .preview,
+        .publish-aside,
+        .ide-inspector {
+          border-left: 0;
+          border-right: 0;
+          border-top: 1px solid var(--line);
+        }
+
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          display: none;
+        }
+      }
+
+      @media (max-width: 720px) {
+        .page {
+          padding: 14px;
+        }
+
+        .topbar {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          justify-content: flex-start;
+        }
+
+        .paper {
+          width: calc(100% - 20px);
+          padding: 32px 22px 48px;
+        }
+
+        .title-input {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <nav class="template-nav" aria-label="模板">
+        <a href="#template-simple">A+B 融合</a>
+        <a href="#template-notion">A+B 完整版</a>
+        <a href="#template-technical">新方案 2</a>
+        <a href="#template-publish">新方案 3</a>
+      </nav>
+
+      <section class="template" id="template-simple">
+        <div class="template-title">
+          <h1>方案 A+B 融合：Simple Toolbar + Notion Blocks</h1>
+          <p>以官方 Simple Editor 的稳定工具栏为底座，加入 Notion/GitBook 式块操作、slash menu 和右侧 Inspector。</p>
+        </div>
+        <div class="chrome">
+          <header class="topbar">
+            <div class="brandline">
+              <span class="brandmark">TR</span>
+              <div class="crumbs">
+                <span>文章管理 / 新建文章 / 富文本</span>
+                <strong>TwoRiver Composer</strong>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn muted-button">预览</button>
+              <button class="btn">保存草稿</button>
+              <button class="btn primary">发布</button>
+            </div>
+          </header>
+          <div class="workspace">
+            <aside class="sidebar">
+              <section class="panel-section">
+                <h2>大纲</h2>
+                <ol class="outline-list">
+                  <li><a href="#">Edge Runtime 的边界</a></li>
+                  <li><a href="#">缓存策略</a></li>
+                  <li><a href="#">部署清单</a></li>
+                </ol>
+              </section>
+              <section class="panel-section">
+                <h2>资源</h2>
+                <span class="chip">3 张图片</span>
+                <span class="chip">1 个代码片段</span>
+              </section>
+            </aside>
+            <section class="canvas-wrap">
+              <div class="canvas-toolbar" aria-label="编辑工具">
+                <button class="tool">↶</button>
+                <button class="tool">↷</button>
+                <button class="btn blue">H2</button>
+                <button class="tool">B</button>
+                <button class="tool"><i>I</i></button>
+                <button class="tool">S</button>
+                <button class="tool">&lt;/&gt;</button>
+                <button class="tool">•</button>
+                <button class="tool">1.</button>
+                <button class="tool">“</button>
+                <button class="btn">链接</button>
+                <button class="btn">图片</button>
+                <button class="btn">代码</button>
+                <button class="btn">表格</button>
+                <button class="btn green">/ 插入</button>
+              </div>
+              <article class="paper">
+                <input class="title-input" value="用 Edge Runtime 重构博客发布链路" aria-label="标题" />
+                <textarea class="summary-input" aria-label="摘要">记录一次从 Markdown 到结构化富文本的迁移方案，包括编辑器能力、内容校验与灰度发布策略。</textarea>
+                <div class="doc-body">
+                  <div class="block-rail">
+                    <span class="block-handle">⋮</span>
+                    <div>
+                      <h2>Edge Runtime 的边界</h2>
+                      <p>正文不再被设置项挤压，工具栏只保留当前写作阶段需要的操作。</p>
+                    </div>
+                  </div>
+                  <pre><span class="code-head"><span>typescript</span><button>复制</button></span><code>export function publishDraft(input: ArticleDraft) {
+  return validateArticleDocument(input.content)
+}</code></pre>
+                  <div class="slash-row"><strong>/</strong><span>输入命令插入 Callout、代码块、图片、表格或 Mermaid</span></div>
+                  <div class="command-menu" aria-label="命令菜单">
+                    <button><span class="chip blue">H2</span><span>二级标题</span></button>
+                    <button><span class="chip green">i</span><span>Info Callout</span></button>
+                    <button><span class="chip">{"{}"}</span><span>代码块</span></button>
+                    <button><span class="chip">[]</span><span>表格</span></button>
+                  </div>
+                  <div class="callout"><p>发布前保持 TipTap 闸门关闭，先完成 3-5 篇人工验收。</p></div>
+                </div>
+              </article>
+            </section>
+            <aside class="inspector">
+              <section class="panel-section">
+                <h2>发布</h2>
+                <div class="status-row">
+                  <span class="chip green">草稿</span>
+                  <span class="chip">ZH</span>
+                  <span class="chip">EN</span>
+                </div>
+              </section>
+              <section class="panel-section">
+                <h2>文章信息</h2>
+                <label class="field"><span>Slug</span><input value="edge-runtime-blog-pipeline" /></label>
+                <label class="field"><span>分类</span><select><option>Engineering</option></select></label>
+                <label class="field"><span>标签</span><input value="Edge, TipTap, CI" /></label>
+              </section>
+              <section class="panel-section">
+                <h2>封面</h2>
+                <div class="cover-slot">cover image</div>
+              </section>
+              <section class="panel-section">
+                <h2>当前块</h2>
+                <label class="field"><span>块类型</span><select><option>Code block</option><option>Callout</option><option>Image</option></select></label>
+                <label class="field"><span>锚点</span><input value="edge-runtime-boundary" /></label>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="template composer-complete" id="template-notion">
+        <div class="template-title">
+          <h1>方案 A+B 融合：Simple Toolbar + Notion Blocks 完整版</h1>
+          <p>以稳定工具栏作为主操作入口，正文使用 Notion/GitBook 式块编辑；同步翻译、发布闸门、资源检查和文章元信息集中在右侧 Inspector。</p>
+        </div>
+        <div class="chrome">
+          <header class="topbar">
+            <div class="brandline">
+              <span class="brandmark">TR</span>
+              <div class="crumbs">
+                <span>文章管理 / 新建文章 / 富文本工作台</span>
+                <strong>TwoRiver Composer</strong>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn muted-button">返回</button>
+              <button class="btn blue">同步翻译</button>
+              <button class="btn">保存草稿</button>
+              <button class="btn primary">发布</button>
+            </div>
+          </header>
+          <div class="workspace">
+            <aside class="sidebar">
+              <section class="panel-section">
+                <h2>大纲</h2>
+                <ol class="outline-list">
+                  <li><a href="#">Edge Runtime 的边界</a></li>
+                  <li><a href="#">缓存策略</a></li>
+                  <li><a href="#">发布闸门</a></li>
+                  <li><a href="#">部署清单</a></li>
+                </ol>
+              </section>
+              <section class="panel-section">
+                <h2>正文资源</h2>
+                <div class="status-row">
+                  <span class="chip">3 图片</span>
+                  <span class="chip">2 代码块</span>
+                  <span class="chip">1 表格</span>
+                  <span class="chip">1 Mermaid</span>
+                </div>
+              </section>
+              <section class="panel-section">
+                <h2>语言</h2>
+                <div class="translation-dock">
+                  <div class="translation-card">
+                    <strong>中文</strong>
+                    <span>当前编辑</span>
+                  </div>
+                  <div class="translation-card">
+                    <strong>EN</strong>
+                    <span>待同步</span>
+                  </div>
+                </div>
+              </section>
+            </aside>
+            <section class="canvas-wrap">
+              <div class="canvas-toolbar" aria-label="编辑工具">
+                <div class="toolbar-left">
+                  <button class="tool">↶</button>
+                  <button class="tool">↷</button>
+                  <button class="btn blue">H2</button>
+                  <button class="tool">B</button>
+                  <button class="tool"><i>I</i></button>
+                  <button class="tool">S</button>
+                  <button class="tool">&lt;/&gt;</button>
+                  <button class="tool">•</button>
+                  <button class="tool">1.</button>
+                  <button class="tool">❝</button>
+                  <button class="btn">链接</button>
+                  <button class="btn">图片</button>
+                  <button class="btn">代码</button>
+                  <button class="btn">表格</button>
+                  <button class="btn green">/ 插入</button>
+                </div>
+                <div class="toolbar-right">
+                  <span class="chip">已保存 12:42</span>
+                  <button class="btn muted-button">预览</button>
+                </div>
+              </div>
+              <article class="paper">
+                <input class="title-input" value="用 Edge Runtime 重构博客发布链路" aria-label="标题" />
+                <textarea class="summary-input" aria-label="摘要">记录一次从 Markdown 到结构化富文本的迁移方案，包括编辑器能力、内容校验、资源治理、同步翻译和灰度发布策略。</textarea>
+
+                <div class="block-stack">
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <div>
+                      <div class="bubble-toolbar" aria-label="选中文本工具">
+                        <button class="tool">B</button>
+                        <button class="tool"><i>I</i></button>
+                        <button class="tool">&lt;/&gt;</button>
+                        <button class="btn">链接</button>
+                      </div>
+                      <h2>Edge Runtime 的边界</h2>
+                      <p>正文不再被设置项挤压；作者先在 paper 中完成写作，再通过右侧 Inspector 处理 slug、分类、标签、封面图和发布闸门。</p>
+                    </div>
+                  </div>
+
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <div class="callout">
+                      <p>发布前保持 TipTap 发布闸门关闭，先完成 3-5 篇文章人工验收，再进入小批量生产发布。</p>
+                    </div>
+                  </div>
+
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <pre><span class="code-head"><span>typescript</span><button>复制</button></span><code>export function publishDraft(input: ArticleDraft) {
+  const result = validateArticleDocument(input.content)
+  return result.ok ? enqueuePublish(input) : result
+}</code></pre>
+                  </div>
+
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <div class="mini-table">
+                      <table>
+                        <thead>
+                          <tr><th>质量关口</th><th>目标</th><th>状态</th></tr>
+                        </thead>
+                        <tbody>
+                          <tr><td>check:encoding</td><td>UTF-8 / 无替换符</td><td>pass</td></tr>
+                          <tr><td>build</td><td>CI 同款构建</td><td>pass</td></tr>
+                          <tr><td>E2E</td><td>发布/图片/TipTap</td><td>queued</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <div class="media-row">
+                      <div class="media-thumb" aria-hidden="true"></div>
+                      <div>
+                        <h3>封面和正文图片分开管理</h3>
+                        <p>封面图作为文章元信息放在右侧；正文图片支持上传、拖拽、粘贴、alt、caption 和资源引用检查。</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="block-card">
+                    <span class="block-handle">⋮</span>
+                    <div>
+                      <div class="slash-row"><strong>/</strong><span>输入命令插入 H2、Callout、代码块、图片、表格、Mermaid 或 Details</span></div>
+                      <div class="command-menu" aria-label="命令菜单">
+                        <button><span class="chip blue">H2</span><span>二级标题</span></button>
+                        <button><span class="chip green">i</span><span>Info Callout</span></button>
+                        <button><span class="chip">{"{}"}</span><span>代码块</span></button>
+                        <button><span class="chip">[]</span><span>表格</span></button>
+                        <button><span class="chip">∞</span><span>Mermaid 图表</span></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="sync-command" aria-label="同步翻译">
+                  <span class="chip blue">AI</span>
+                  <input value="同步翻译为英文，保留代码块、链接、图片 alt 和表格结构" aria-label="同步翻译指令" />
+                  <button class="btn primary">执行</button>
+                </div>
+              </article>
+            </section>
+            <aside class="inspector">
+              <section class="panel-section">
+                <h2>发布</h2>
+                <div class="status-row">
+                  <span class="chip green">草稿</span>
+                  <span class="chip blue">TipTap 新建已开</span>
+                  <span class="chip">发布闸门关闭</span>
+                </div>
+              </section>
+              <section class="panel-section">
+                <h2>文章信息</h2>
+                <label class="field"><span>Slug</span><input value="edge-runtime-blog-pipeline" /></label>
+                <label class="field"><span>分类</span><select><option>Engineering</option></select></label>
+                <label class="field"><span>标签</span><input value="Edge, TipTap, CI" /></label>
+              </section>
+              <section class="panel-section">
+                <h2>封面</h2>
+                <div class="cover-slot">cover image</div>
+              </section>
+              <section class="panel-section">
+                <h2>当前块</h2>
+                <label class="field"><span>块类型</span><select><option>Code block</option><option>Callout</option><option>Image</option><option>Table</option></select></label>
+                <label class="field"><span>锚点</span><input value="edge-runtime-boundary" /></label>
+                <div class="block-status">
+                  <span class="chip">language: ts</span>
+                  <span class="chip">copy button</span>
+                  <span class="chip">highlight</span>
+                </div>
+              </section>
+              <section class="panel-section">
+                <h2>验收清单</h2>
+                <ul class="quality-list">
+                  <li><span>标题/摘要</span><strong>ready</strong></li>
+                  <li><span>外链安全属性</span><strong>ready</strong></li>
+                  <li><span>图片 alt</span><strong>2/3</strong></li>
+                  <li><span>人工验收</span><strong>1/5</strong></li>
+                </ul>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="template" id="template-technical">
+        <div class="template-title">
+          <h1>新方案 2：Technical Command Center</h1>
+          <p>面向重技术文章：代码、Mermaid、配置片段、资源引用和发布闸门集中管理。</p>
+        </div>
+        <div class="chrome">
+          <header class="topbar">
+            <div class="brandline">
+              <span class="brandmark">TR</span>
+              <div class="crumbs">
+                <span>Engineering post / Command center</span>
+                <strong>Technical Composer</strong>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn">源文</button>
+              <button class="btn">预览</button>
+              <button class="btn primary">保存</button>
+            </div>
+          </header>
+          <div class="ide-shell">
+            <nav class="ide-nav" aria-label="工程写作">
+              <a class="active" href="#">正文</a>
+              <a href="#">代码片段</a>
+              <a href="#">架构图</a>
+              <a href="#">资源引用</a>
+              <a href="#">发布记录</a>
+            </nav>
+            <section class="ide-main">
+              <div class="ide-toolbar">
+                <button class="tool">↶</button>
+                <button class="tool">↷</button>
+                <button class="btn">H2</button>
+                <button class="btn">code</button>
+                <button class="btn green">mermaid</button>
+                <button class="btn">table</button>
+                <button class="btn">callout</button>
+                <button class="btn">image</button>
+              </div>
+              <div class="ide-editor-grid">
+                <article class="ide-paper">
+                  <input value="CI 同款质量关口与 TipTap 发布闸门" aria-label="标题" />
+                  <textarea aria-label="正文">## Quality gates
+
+pnpm check:encoding
+pnpm build
+pnpm test
+
+```mermaid
+flowchart LR
+  Draft --> Validate --> Preview --> Publish
+```
+
+> 生产发布前先备份 SQLite 和 uploads。</textarea>
+                </article>
+                <aside class="ide-inspector">
+                  <section class="panel-section">
+                    <h2>技术块</h2>
+                    <div class="status-row">
+                      <span class="chip">TS</span>
+                      <span class="chip">Bash</span>
+                      <span class="chip">Mermaid</span>
+                      <span class="chip">Table</span>
+                    </div>
+                  </section>
+                  <section class="panel-section">
+                    <h2>发布闸门</h2>
+                    <label class="field"><span>TipTap 新建</span><input value="enabled" /></label>
+                    <label class="field"><span>TipTap 发布</span><input value="disabled" /></label>
+                  </section>
+                  <section class="panel-section">
+                    <h2>质量关口</h2>
+                    <ul class="checklist">
+                      <li><span>encoding</span><strong>pass</strong></li>
+                      <li><span>build</span><strong>pass</strong></li>
+                      <li><span>image refs</span><strong>3</strong></li>
+                    </ul>
+                  </section>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="template" id="template-publish">
+        <div class="template-title">
+          <h1>新方案 3：Editorial Publish Desk</h1>
+          <p>写作区极简，右侧像发布清单一样处理封面、SEO、分类、标签、链接安全和上线检查。</p>
+        </div>
+        <div class="chrome">
+          <header class="topbar">
+            <div class="brandline">
+              <span class="brandmark">TR</span>
+              <div class="crumbs">
+                <span>New article / Editorial review</span>
+                <strong>Publish Desk</strong>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn">沉浸写作</button>
+              <button class="btn">读者预览</button>
+              <button class="btn primary">准备发布</button>
+            </div>
+          </header>
+          <div class="publish-layout">
+            <section class="publish-main">
+              <div class="publish-card">
+                <div class="cover-wide"></div>
+                <article class="paper compact" style="width: 100%; margin: 0;">
+                  <input class="title-input" value="TwoRiver 编辑器重构方案" aria-label="标题" />
+                  <textarea class="summary-input" aria-label="摘要">把正文编辑和发布检查拆开，降低新建文章首屏压力。</textarea>
+                  <div class="doc-body">
+                    <h2>设计原则</h2>
+                    <p>编辑页只服务写作，发布前再集中处理元信息、SEO、资源引用和安全检查。</p>
+                    <h3>技术块</h3>
+                    <p>代码块、表格、Callout、Mermaid 是技术博客的第一优先级。</p>
+                  </div>
+                </article>
+              </div>
+            </section>
+            <aside class="publish-aside">
+              <section class="panel-section">
+                <h2>发布检查</h2>
+                <ul class="checklist">
+                  <li><span>标题</span><strong>完成</strong></li>
+                  <li><span>摘要</span><strong>完成</strong></li>
+                  <li><span>封面图</span><strong>待补</strong></li>
+                  <li><span>分类标签</span><strong>完成</strong></li>
+                  <li><span>链接安全</span><strong>通过</strong></li>
+                </ul>
+              </section>
+              <section class="panel-section">
+                <h2>SEO</h2>
+                <label class="field"><span>标题</span><input value="TwoRiver 编辑器重构方案" /></label>
+                <label class="field"><span>描述</span><textarea rows="4">面向技术博客的 TipTap 编辑器与发布台重构。</textarea></label>
+              </section>
+              <section class="panel-section">
+                <h2>上线策略</h2>
+                <label class="field"><span>发布时间</span><input value="立即发布" /></label>
+                <label class="field"><span>可见性</span><select><option>公开</option><option>隐藏</option></select></label>
+              </section>
+              <button class="btn primary">通过检查并发布</button>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

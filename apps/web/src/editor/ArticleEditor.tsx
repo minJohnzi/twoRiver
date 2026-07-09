@@ -3,6 +3,7 @@ import { validateArticleDocument, type ArticleDocument } from "@tworiver/content
 import type { Locale } from "@tworiver/shared";
 import { FileHandler } from "@tiptap/extension-file-handler";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import { BubbleMenu, FloatingMenu } from "@tiptap/react/menus";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   ARTICLE_IMAGE_MIME_TYPES,
@@ -27,6 +28,7 @@ export interface ArticleEditorToolbarState {
   isParagraph: boolean;
   isHeading2: boolean;
   isHeading3: boolean;
+  isHeading4: boolean;
   isBold: boolean;
   isItalic: boolean;
   isStrike: boolean;
@@ -41,15 +43,19 @@ export interface ArticleEditorToolbarState {
   canRedo: boolean;
   codeLanguage: string;
   linkHref: string;
+  hasSelection: boolean;
+  isFocused: boolean;
+  isEmptyParagraph: boolean;
 }
 
 export interface ArticleEditorToolbarActions {
   setParagraph: () => void;
-  setHeading: (level: 2 | 3) => void;
+  setHeading: (level: 2 | 3 | 4) => void;
   toggleBold: () => void;
   toggleItalic: () => void;
   toggleStrike: () => void;
   toggleCode: () => void;
+  toggleCodeBlock: () => void;
   toggleBulletList: () => void;
   toggleOrderedList: () => void;
   toggleBlockquote: () => void;
@@ -72,7 +78,26 @@ const EMPTY_ARTICLE_DOCUMENT: ArticleDocument = {
   content: [{ type: "paragraph" }]
 };
 
-const CODE_LANGUAGES = ["plaintext", "ts", "js", "python", "bash", "json", "css", "html", "md"] as const;
+const CODE_LANGUAGES = [
+  "plaintext",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "python",
+  "bash",
+  "json",
+  "yaml",
+  "scss",
+  "css",
+  "html",
+  "md",
+  "sql",
+  "go",
+  "rust",
+  "java",
+  "mermaid"
+] as const;
 
 function editorLabels(locale: Locale) {
   if (locale === "zh") {
@@ -83,10 +108,12 @@ function editorLabels(locale: Locale) {
       paragraph: "正文",
       heading2: "二级标题",
       heading3: "三级标题",
+      heading4: "四级标题",
       bold: "加粗",
       italic: "斜体",
       strike: "删除线",
       code: "行内代码",
+      codeBlock: "代码块",
       bulletList: "无序列表",
       orderedList: "有序列表",
       blockquote: "引用",
@@ -94,7 +121,7 @@ function editorLabels(locale: Locale) {
       linkUrl: "链接地址",
       applyLink: "应用链接",
       removeLink: "移除链接",
-      codeBlock: "代码块语言",
+      codeBlockLanguage: "代码块语言",
       image: "插入图片",
       table: "插入表格",
       addRow: "添加行",
@@ -114,10 +141,12 @@ function editorLabels(locale: Locale) {
     paragraph: "Paragraph",
     heading2: "Heading 2",
     heading3: "Heading 3",
+    heading4: "Heading 4",
     bold: "Bold",
     italic: "Italic",
     strike: "Strike",
     code: "Inline code",
+    codeBlock: "Code block",
     bulletList: "Bullet list",
     orderedList: "Ordered list",
     blockquote: "Quote",
@@ -125,7 +154,7 @@ function editorLabels(locale: Locale) {
     linkUrl: "Link URL",
     applyLink: "Apply link",
     removeLink: "Remove link",
-    codeBlock: "Code block language",
+    codeBlockLanguage: "Code block language",
     image: "Insert image",
     table: "Insert table",
     addRow: "Add row",
@@ -356,7 +385,13 @@ function ArticleEditorToolbar({
   });
   const actions = useMemo(() => toolbarActionsFromEditor(editor, onRequestImage), [editor, onRequestImage]);
 
-  return <ArticleEditorToolbarView locale={locale} state={state} actions={actions} isImageUploading={isImageUploading} />;
+  return (
+    <>
+      <ArticleEditorBubbleMenu editor={editor} locale={locale} state={state} actions={actions} />
+      <ArticleEditorInsertMenu editor={editor} locale={locale} state={state} actions={actions} isImageUploading={isImageUploading} />
+      <ArticleEditorToolbarView locale={locale} state={state} actions={actions} isImageUploading={isImageUploading} />
+    </>
+  );
 }
 
 function toolbarStateFromEditor(editor: Editor): ArticleEditorToolbarState {
@@ -365,6 +400,7 @@ function toolbarStateFromEditor(editor: Editor): ArticleEditorToolbarState {
     isParagraph: editor.isActive("paragraph"),
     isHeading2: editor.isActive("heading", { level: 2 }),
     isHeading3: editor.isActive("heading", { level: 3 }),
+    isHeading4: editor.isActive("heading", { level: 4 }),
     isBold: editor.isActive("bold"),
     isItalic: editor.isActive("italic"),
     isStrike: editor.isActive("strike"),
@@ -378,7 +414,14 @@ function toolbarStateFromEditor(editor: Editor): ArticleEditorToolbarState {
     canUndo: canRun(editor, (chain) => chain.undo()),
     canRedo: canRun(editor, (chain) => chain.redo()),
     codeLanguage: String(editor.getAttributes("codeBlock").language ?? "plaintext"),
-    linkHref: String(editor.getAttributes("link").href ?? "")
+    linkHref: String(editor.getAttributes("link").href ?? ""),
+    hasSelection: !editor.state.selection.empty,
+    isFocused: editor.isFocused,
+    isEmptyParagraph:
+      editor.isActive("paragraph") &&
+      editor.state.selection.empty &&
+      editor.state.selection.$from.parent.type.name === "paragraph" &&
+      editor.state.selection.$from.parent.content.size === 0
   };
 }
 
@@ -399,6 +442,7 @@ function toolbarActionsFromEditor(editor: Editor, onRequestImage?: (editor: Edit
     toggleItalic: () => editor.chain().focus().toggleItalic().run(),
     toggleStrike: () => editor.chain().focus().toggleStrike().run(),
     toggleCode: () => editor.chain().focus().toggleCode().run(),
+    toggleCodeBlock: () => editor.chain().focus().toggleCodeBlock().run(),
     toggleBulletList: () => editor.chain().focus().toggleBulletList().run(),
     toggleOrderedList: () => editor.chain().focus().toggleOrderedList().run(),
     toggleBlockquote: () => editor.chain().focus().toggleBlockquote().run(),
@@ -450,25 +494,28 @@ export function ArticleEditorToolbarView({
 
   return (
     <div className="article-rich-editor__toolbar" role="toolbar" aria-label={labels.toolbar}>
-      <div className="article-rich-editor__toolbar-group">
-        <ToolbarButton label={labels.paragraph} pressed={state.isParagraph} disabled={disabled} onClick={actions.setParagraph} />
-        <ToolbarButton label={labels.heading2} pressed={state.isHeading2} disabled={disabled} onClick={() => actions.setHeading(2)} />
-        <ToolbarButton label={labels.heading3} pressed={state.isHeading3} disabled={disabled} onClick={() => actions.setHeading(3)} />
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "段落样式" : "Block style"}>
+        <ToolbarButton label={labels.paragraph} shortLabel="P" pressed={state.isParagraph} disabled={disabled} onClick={actions.setParagraph} />
+        <ToolbarButton label={labels.heading2} shortLabel="H2" pressed={state.isHeading2} disabled={disabled} onClick={() => actions.setHeading(2)} />
+        <ToolbarButton label={labels.heading3} shortLabel="H3" pressed={state.isHeading3} disabled={disabled} onClick={() => actions.setHeading(3)} />
+        <ToolbarButton label={labels.heading4} shortLabel="H4" pressed={state.isHeading4} disabled={disabled} onClick={() => actions.setHeading(4)} />
       </div>
-      <div className="article-rich-editor__toolbar-group">
-        <ToolbarButton label={labels.bold} pressed={state.isBold} disabled={disabled} onClick={actions.toggleBold} />
-        <ToolbarButton label={labels.italic} pressed={state.isItalic} disabled={disabled} onClick={actions.toggleItalic} />
-        <ToolbarButton label={labels.strike} pressed={state.isStrike} disabled={disabled} onClick={actions.toggleStrike} />
-        <ToolbarButton label={labels.code} pressed={state.isCode} disabled={disabled} onClick={actions.toggleCode} />
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "行内格式" : "Inline formatting"}>
+        <ToolbarButton label={labels.bold} shortLabel="B" pressed={state.isBold} disabled={disabled} onClick={actions.toggleBold} />
+        <ToolbarButton label={labels.italic} shortLabel="I" pressed={state.isItalic} disabled={disabled} onClick={actions.toggleItalic} />
+        <ToolbarButton label={labels.strike} shortLabel="S" pressed={state.isStrike} disabled={disabled} onClick={actions.toggleStrike} />
+        <ToolbarButton label={labels.code} shortLabel="</>" pressed={state.isCode} disabled={disabled} onClick={actions.toggleCode} />
       </div>
-      <div className="article-rich-editor__toolbar-group">
-        <ToolbarButton label={labels.bulletList} pressed={state.isBulletList} disabled={disabled} onClick={actions.toggleBulletList} />
-        <ToolbarButton label={labels.orderedList} pressed={state.isOrderedList} disabled={disabled} onClick={actions.toggleOrderedList} />
-        <ToolbarButton label={labels.blockquote} pressed={state.isBlockquote} disabled={disabled} onClick={actions.toggleBlockquote} />
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "块格式" : "Block formatting"}>
+        <ToolbarButton label={labels.bulletList} shortLabel="•" pressed={state.isBulletList} disabled={disabled} onClick={actions.toggleBulletList} />
+        <ToolbarButton label={labels.orderedList} shortLabel="1." pressed={state.isOrderedList} disabled={disabled} onClick={actions.toggleOrderedList} />
+        <ToolbarButton label={labels.blockquote} shortLabel="“" pressed={state.isBlockquote} disabled={disabled} onClick={actions.toggleBlockquote} />
+        <ToolbarButton label={labels.horizontalRule} shortLabel="—" disabled={disabled} onClick={actions.insertHorizontalRule} />
       </div>
-      <div className="article-rich-editor__toolbar-group article-rich-editor__toolbar-group--link">
+      <div className="article-rich-editor__toolbar-group article-rich-editor__toolbar-group--link" role="group" aria-label={labels.link}>
         <ToolbarButton
           label={labels.link}
+          shortLabel={locale === "zh" ? "链接" : "Link"}
           pressed={state.isLink || isLinkOpen}
           disabled={disabled}
           onClick={() => setIsLinkOpen((current) => !current)}
@@ -503,11 +550,13 @@ export function ArticleEditorToolbarView({
           </form>
         ) : null}
       </div>
-      <div className="article-rich-editor__toolbar-group">
-        <label className="article-rich-editor__select-label">
-          <span>{labels.codeBlock}</span>
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "插入" : "Insert"}>
+        <ToolbarButton label={labels.image} shortLabel={locale === "zh" ? "图片" : "Image"} disabled={disabled || isImageUploading} onClick={actions.requestImage} />
+        <ToolbarButton label={labels.codeBlock} shortLabel={locale === "zh" ? "代码" : "Code"} pressed={state.isCodeBlock} disabled={disabled} onClick={actions.toggleCodeBlock} />
+        <label className="article-rich-editor__select-label article-rich-editor__select-label--compact">
+          <span>{locale === "zh" ? "语言" : "Lang"}</span>
           <select
-            aria-label={labels.codeBlock}
+            aria-label={labels.codeBlockLanguage}
             value={state.codeLanguage}
             disabled={disabled}
             onChange={(event) => actions.setCodeBlockLanguage(event.target.value)}
@@ -519,32 +568,115 @@ export function ArticleEditorToolbarView({
             ))}
           </select>
         </label>
-        <ToolbarButton label={labels.image} disabled={disabled || isImageUploading} onClick={actions.requestImage} />
-        <ToolbarButton label={labels.horizontalRule} disabled={disabled} onClick={actions.insertHorizontalRule} />
       </div>
-      <div className="article-rich-editor__toolbar-group">
-        <ToolbarButton label={labels.table} disabled={disabled} onClick={actions.insertTable} />
-        <ToolbarButton label={labels.addRow} disabled={disabled || !state.isInTable} onClick={actions.addTableRow} />
-        <ToolbarButton label={labels.deleteRow} disabled={disabled || !state.isInTable} onClick={actions.deleteTableRow} />
-        <ToolbarButton label={labels.addColumn} disabled={disabled || !state.isInTable} onClick={actions.addTableColumn} />
-        <ToolbarButton label={labels.deleteColumn} disabled={disabled || !state.isInTable} onClick={actions.deleteTableColumn} />
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "表格" : "Table"}>
+        <ToolbarButton label={labels.table} shortLabel={locale === "zh" ? "表格" : "Table"} disabled={disabled} onClick={actions.insertTable} />
+        <ToolbarButton label={labels.addRow} shortLabel="+R" disabled={disabled || !state.isInTable} onClick={actions.addTableRow} />
+        <ToolbarButton label={labels.deleteRow} shortLabel="-R" disabled={disabled || !state.isInTable} onClick={actions.deleteTableRow} />
+        <ToolbarButton label={labels.addColumn} shortLabel="+C" disabled={disabled || !state.isInTable} onClick={actions.addTableColumn} />
+        <ToolbarButton label={labels.deleteColumn} shortLabel="-C" disabled={disabled || !state.isInTable} onClick={actions.deleteTableColumn} />
       </div>
-      <div className="article-rich-editor__toolbar-group">
-        <ToolbarButton label={labels.undo} disabled={disabled || !state.canUndo} onClick={actions.undo} />
-        <ToolbarButton label={labels.redo} disabled={disabled || !state.canRedo} onClick={actions.redo} />
+      <div className="article-rich-editor__toolbar-group" role="group" aria-label={locale === "zh" ? "历史" : "History"}>
+        <ToolbarButton label={labels.undo} shortLabel="↶" disabled={disabled || !state.canUndo} onClick={actions.undo} />
+        <ToolbarButton label={labels.redo} shortLabel="↷" disabled={disabled || !state.canRedo} onClick={actions.redo} />
       </div>
     </div>
   );
 }
 
+function ArticleEditorBubbleMenu({
+  editor,
+  locale,
+  state,
+  actions
+}: {
+  editor: Editor;
+  locale: Locale;
+  state: ArticleEditorToolbarState;
+  actions: ArticleEditorToolbarActions;
+}) {
+  const labels = editorLabels(locale);
+  const disabled = !state.isEditable;
+
+  return (
+    <BubbleMenu
+      editor={editor}
+      pluginKey="article-selection-bubble-menu"
+      className="article-rich-editor__bubble-menu"
+      role="toolbar"
+      aria-label={locale === "zh" ? "Selection formatting" : "Selection formatting"}
+      shouldShow={({ editor: currentEditor, state: currentState }) =>
+        currentEditor.isEditable && currentEditor.isFocused && !currentState.selection.empty
+      }
+    >
+      <ToolbarButton label={labels.bold} shortLabel="B" pressed={state.isBold} disabled={disabled} onClick={actions.toggleBold} />
+      <ToolbarButton label={labels.italic} shortLabel="I" pressed={state.isItalic} disabled={disabled} onClick={actions.toggleItalic} />
+      <ToolbarButton label={labels.link} shortLabel={locale === "zh" ? "Link" : "Link"} pressed={state.isLink} disabled={disabled} onClick={() => actions.setLink(state.linkHref || "https://")} />
+      <ToolbarButton label={labels.heading2} shortLabel="H2" pressed={state.isHeading2} disabled={disabled} onClick={() => actions.setHeading(2)} />
+      <ToolbarButton label={labels.blockquote} shortLabel=">" pressed={state.isBlockquote} disabled={disabled} onClick={actions.toggleBlockquote} />
+      <ToolbarButton label={labels.code} shortLabel="</>" pressed={state.isCode} disabled={disabled} onClick={actions.toggleCode} />
+    </BubbleMenu>
+  );
+}
+
+function ArticleEditorInsertMenu({
+  editor,
+  locale,
+  state,
+  actions,
+  isImageUploading = false
+}: {
+  editor: Editor;
+  locale: Locale;
+  state: ArticleEditorToolbarState;
+  actions: ArticleEditorToolbarActions;
+  isImageUploading?: boolean;
+}) {
+  const labels = editorLabels(locale);
+  const disabled = !state.isEditable;
+
+  return (
+    <FloatingMenu
+      editor={editor}
+      pluginKey="article-empty-block-insert-menu"
+      className="article-rich-editor__insert-menu"
+      role="toolbar"
+      aria-label={locale === "zh" ? "Insert block" : "Insert block"}
+      shouldShow={({ editor: currentEditor, state: currentState }) => {
+        const { selection } = currentState;
+        return (
+          currentEditor.isEditable &&
+          currentEditor.isFocused &&
+          selection.empty &&
+          currentEditor.isActive("paragraph") &&
+          selection.$from.parent.type.name === "paragraph" &&
+          selection.$from.parent.content.size === 0
+        );
+      }}
+    >
+      <span className="article-rich-editor__slash-trigger" aria-hidden="true">/</span>
+      <span className="article-rich-editor__insert-menu-label">Insert block</span>
+      <ToolbarButton label={labels.image} shortLabel="+" disabled={disabled || isImageUploading} onClick={actions.requestImage} />
+      <ToolbarButton label={labels.codeBlock} shortLabel="Code" pressed={state.isCodeBlock} disabled={disabled} onClick={actions.toggleCodeBlock} />
+      <ToolbarButton label={labels.table} shortLabel="Table" disabled={disabled} onClick={actions.insertTable} />
+      <ToolbarButton label="Mermaid" shortLabel="Mermaid" disabled={disabled} onClick={() => {
+        actions.setCodeBlockLanguage("mermaid");
+      }} />
+      <ToolbarButton label={labels.horizontalRule} shortLabel="Divider" disabled={disabled} onClick={actions.insertHorizontalRule} />
+    </FloatingMenu>
+  );
+}
+
 function ToolbarButton({
   label,
+  shortLabel,
   pressed,
   expanded,
   disabled,
   onClick
 }: {
   label: string;
+  shortLabel?: string;
   pressed?: boolean;
   expanded?: boolean;
   disabled?: boolean;
@@ -558,8 +690,10 @@ function ToolbarButton({
       aria-expanded={expanded}
       disabled={disabled}
       onClick={onClick}
+      title={label}
+      className="article-rich-editor__tool-button"
     >
-      {label}
+      {shortLabel ?? label}
     </button>
   );
 }

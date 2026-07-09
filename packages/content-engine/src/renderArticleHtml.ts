@@ -1,5 +1,7 @@
 import type { ArticleDocument, ArticleMark, ArticleNode } from "./documentTypes.js";
 import { ARTICLE_DOCUMENT_SCHEMA_VERSION } from "./documentTypes.js";
+import { normalizeCodeBlockLanguage } from "./codeLanguages.js";
+import { classifyArticleLink } from "./urlPolicy.js";
 
 export class ArticleHtmlRenderError extends Error {
   readonly code: string;
@@ -100,7 +102,11 @@ function renderOrderedList(node: ArticleNode): string {
 }
 
 function renderCodeBlock(node: ArticleNode): string {
-  const language = typeof node.attrs?.language === "string" && node.attrs.language ? node.attrs.language : "";
+  const normalizedLanguage = normalizeCodeBlockLanguage(node.attrs?.language);
+  if (normalizedLanguage === null) {
+    throw new ArticleHtmlRenderError("invalid-code-language");
+  }
+  const language = normalizedLanguage ?? "";
   const className = language ? `hljs language-${language}` : "hljs";
   return `<pre><code class="${escapeAttribute(className)}">${escapeHtml(textContent(node))}</code></pre>`;
 }
@@ -143,11 +149,24 @@ function renderLink(mark: ArticleMark, html: string): string {
     throw new ArticleHtmlRenderError("invalid-link-href");
   }
 
+  const linkKind = classifyArticleLink(href);
+  if (linkKind === null) {
+    throw new ArticleHtmlRenderError("unsafe-link-href");
+  }
+
   const attributes = [`href="${escapeAttribute(href)}"`];
-  for (const name of ["target", "rel", "class"] as const) {
-    const value = mark.attrs?.[name];
-    if (typeof value === "string" && value.length > 0) {
-      attributes.push(`${name}="${escapeAttribute(value)}"`);
+  const className = mark.attrs?.class;
+  if (typeof className === "string" && className.length > 0) {
+    attributes.push(`class="${escapeAttribute(className)}"`);
+  }
+  if (linkKind === "external") {
+    attributes.push('target="_blank"', 'rel="noopener noreferrer"');
+  } else {
+    for (const name of ["target", "rel"] as const) {
+      const value = mark.attrs?.[name];
+      if (typeof value === "string" && value.length > 0) {
+        attributes.push(`${name}="${escapeAttribute(value)}"`);
+      }
     }
   }
 
